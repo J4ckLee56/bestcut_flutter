@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<fcpxml version="1.6">
+  <import-options>
+    <option value="1" key="suppress warnings"/>
+  </import-options>
+  <resources>
+    <format id="f1" frameDuration="1/30s" width="1920" height="1080"/>
+    <asset id="a1" src="file:///Volumes/Macintosh HD/Users/ihuijae/Desktop/PythonWorkspace/videos/로운맘의넛지육아_유아기관계기술_01_요약.mp4" format="f1" duration="49.36/30s" name="로운맘의넛지육아_유아기관계기술_01_요약.mp4" hasAudio="1" hasVideo="1" start="0/30s"/>
+    <effect id="e1" name="Custom" uid=".../Titles.localized/Build In:Out.localized/Custom.localized/Custom.moti"/>
+  </resources>
+  <library>
+    <event name="Event">
+      <project name="로운맘의넛지육아_유아기관계기술_01_요약_Summary">
+        <sequence duration="461/30s" format="f1" tcStart="0s">
+          <spine>
+            <asset-clip name="로운맘의넛지육아_유아기관계기술_01_요약.mp4" ref="a1" start="0/30s" offset="0/30s" duration="71/30s">
+              <title lane="1" name="박사님은 흔쾌히 좋아요라고 하시고는" ref="e1" offset="0/30s" start="0/30s" duration="71/30s">
+                <text>
+                  <text-style ref="ts0">박사님은 흔쾌히 좋아요라고 하시고는</text-style>
+                </text>
+                <text-style-def id="ts0">
+                  <text-style alignment="center" fontColor="255 255 255 1" font="Apple SD Gothic Neo" fontSize="70" lineSpacing="0" baseline="0" strokeColor="0 0 0 0" strokeWidth="1"/>
+                </text-style-def>
+                <adjust-transform position="0 -43.79629629629629" scale="1 1" anchor="0 0"/>
+              </title>
+            </asset-clip>
+            <asset-clip name="로운맘의넛지육아_유아기관계기술_01_요약.mp4" ref="a1" start="423/30s" offset="71/30s" duration="132/30s">
+              <title lane="1" name="소망이는 그 표정을 바라보며 조심스럽게 감정을 읽기 시작했어요." ref="e1" offset="71/30s" start="0/30s" duration="132/30s">
+                <text>
+                  <text-style ref="ts1">소망이는 그 표정을 바라보며 조심스럽게 감정을 읽기 시작했어요.</text-style>
+                </text>
+                <text-style-def id="ts1">
+                  <text-style alignment="center" fontColor="255 255 255 1" font="Apple SD Gothic Neo" fontSize="70" lineSpacing="0" baseline="0" strokeColor="0 0 0 0" strokeWidth="1"/>
+                </text-style-def>
+                <adjust-transform position="0 -43.79629629629629" scale="1 1" anchor="0 0"/>
+              </title>
+            </asset-clip>
+            <asset-clip name="로운맘의넛지육아_유아기관계기술_01_요약.mp4" ref="a1" start="905/30s" offset="203/30s" duration="154/30s">
+              <title lane="1" name="그 감정이 어떻게 반응하면 좋을지를 이미 자기식으로 해석하고 있었거든요." ref="e1" offset="203/30s" start="0/30s" duration="154/30s">
+                <text>
+                  <text-style ref="ts2">그 감정이 어떻게 반응하면 좋을지를 이미 자기식으로 해석하고 있었거든요.</text-style>
+                </text>
+                <text-style-def id="ts2">
+                  <text-style alignment="center" fontColor="255 255 255 1" font="Apple SD Gothic Neo" fontSize="70" lineSpacing="0" baseline="0" strokeColor="0 0 0 0" strokeWidth="1"/>
+                </text-style-def>
+                <adjust-transform position="0 -43.79629629629629" scale="1 1" anchor="0 0"/>
+              </title>
+            </asset-clip>
+            <asset-clip name="로운맘의넛지육아_유아기관계기술_01_요약.mp4" ref="a1" start="1377/30s" offset="357/30s" duration="104/30s">
+              <title lane="1" name="저는 그 순간 아이의 반응이 무척 인상 깊었습니다." ref="e1" offset="357/30s" start="0/30s" duration="104/30s">
+                <text>
+                  <text-style ref="ts3">저는 그 순간 아이의 반응이 무척 인상 깊었습니다.</text-style>
+                </text>
+                <text-style-def id="ts3">
+                  <text-style alignment="center" fontColor="255 255 255 1" font="Apple SD Gothic Neo" fontSize="70" lineSpacing="0" baseline="0" strokeColor="0 0 0 0" strokeWidth="1"/>
+                </text-style-def>
+                <adjust-transform position="0 -43.79629629629629" scale="1 1" anchor="0 0"/>
+              </title>
+            </asset-clip>
+          </spine>
+        </sequence>
+      </project>
+    </event>
+  </library>
+</fcpxml>

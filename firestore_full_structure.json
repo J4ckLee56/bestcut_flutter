@@ -1,0 +1,534 @@
+{
+  "actions": {
+    "0cae15c8-1c96-4c6e-91ab-fd6e8b54f51c": {
+      "data": {
+        "success": true,
+        "transcribeMeta": {
+          "videoLength": 120.827,
+          "duration": 120.827,
+          "computeDevice": "mps",
+          "videoId": "660c4d50acdd68ecbcd869c955ca37f394d3f824fd39ea35289b881bedb8647f",
+          "speechRate": 1.8704428645915234,
+          "modelSize": "large-v3-turbo",
+          "segmentCount": 37
+        },
+        "type": "transcribe",
+        "actionId": "0cae15c8-1c96-4c6e-91ab-fd6e8b54f51c",
+        "userId": "nddO55kmtfe0WG5lPgFvEdM3iLv1",
+        "processingTime": 26628,
+        "remainingCredits": 998,
+        "timestamp": "2025-07-17T09:27:54.674000+00:00",
+        "creditCost": 2
+      },
+      "subcollections": {}
+    },
+    "10674640-55e9-456a-98d2-d6f9d2d28b2e": {
+      "data": {
+        "success": true,
+        "type": "export",
+        "actionId": "10674640-55e9-456a-98d2-d6f9d2d28b2e",
+        "userId": "eNjLyug8edZLeCYugf3M7pLfJWu2",
+        "exportMeta": {
+          "outputUrl": null,
+          "fileSize": null
+        },
+        "processingTime": null,
+        "remainingCredits": null,
+        "timestamp": "2025-07-24T08:57:33.975000+00:00",
+        "creditCost": null
+      },
+      "subcollections": {}
+    },
+    "32bde7db-afed-4ae7-ada8-84f41aef7127": {
+      "data": {
+        "success": true,
+        "type": "summarize",
+        "actionId": "32bde7db-afed-4ae7-ada8-84f41aef7127",
+        "userId": "nddO55kmtfe0WG5lPgFvEdM3iLv1",
+        "summarizeMeta": {
+          "segmentCount": 20,
+          "speechRate": 1.9455252918287935,
+          "summaryLength": 66.82000000000001,
+          "apiCost": 0,
+          "tokenUsage": {
+            "out": 0,
+            "in": 0
+          },
+          "videoId": "660c4d50acdd68ecbcd869c955ca37f394d3f824fd39ea35289b881bedb8647f"
+        },
+        "processingTime": 8663,
+        "remainingCredits": 948,
+        "timestamp": "2025-07-17T09:28:09.317000+00:00",
+        "creditCost": 50
+      },
+      "subcollections": {}
+    },
+    "420b999b-fc9b-4e94-9934-5958214e77e2": {
+      "data": {
+        "success": true,
+        "type": "summarize",
+        "actionId": "420b999b-fc9b-4e94-9934-5958214e77e2",
+        "userId": "eNjLyug8edZLeCYugf3M7pLfJWu2",
+        "summarizeMeta": {
+          "segmentCount": 90,
+          "speechRate": 1.9145950280673611,
+          "summaryLength": 299.2800000000001,
+          "apiCost": 0,
+          "tokenUsage": {
+            "out": 0,
+            "in": 0
+          },
+          "videoId": "0112ff8758ad87a9284e94ef6f294959b51cdea5e1c2fba267ba22fd4d8427b2"
+        },
+        "processingTime": 18982,
+        "remainingCredits": 885,
+        "timestamp": "2025-07-24T08:53:42.085000+00:00",
+        "creditCost": 50
+      },
+      "subcollections": {}
+    },
+    "6ecaae55-bc78-4fa1-a8b4-0eee670c01cb": {
+      "data": {
+        "success": true,
+        "transcribeMeta": {
+          "videoLength": 876.043,
+          "duration": 876.043,
+          "computeDevice": "mps",
+          "videoId": "0112ff8758ad87a9284e94ef6f294959b51cdea5e1c2fba267ba22fd4d8427b2",
+          "speechRate": 1.852648785504821,
+          "modelSize": "large-v3-turbo",
+          "segmentCount": 268
+        },
+        "type": "transcribe",
+        "actionId": "6ecaae55-bc78-4fa1-a8b4-0eee670c01cb",
+        "userId": "eNjLyug8edZLeCYugf3M7pLfJWu2",
+        "processingTime": 238555,
+        "remainingCredits": 985,
+        "timestamp": "2025-07-24T08:50:02.466000+00:00",
+        "creditCost": 15
+      },
+      "subcollections": {}
+    },
+    "6edcd8f0-564a-46b4-ab1d-dedb262e75a9": {
+      "data": {
+        "success": true,
+        "type": "summarize",
+        "actionId": "6edcd8f0-564a-46b4-ab1d-dedb262e75a9",
+        "userId": "PBvc1EjOq6c0dm0RwXPKsxpmixC2",
+        "summarizeMeta": {
+          "segmentCount": 50,
+          "speechRate": 0.06693782684485763,
+          "summaryLength": 2151.25,
+          "apiCost": 0.01654,
+          "tokenUsage": {
+            "out": 213,
+            "in": 8057
+          },
+          "videoId": "a97e8b5b17da2979d761e261e782250204c5f03a5490c5c642cdd4cd7a04f2d5"
+        },
+        "processingTime": 24298,
+        "remainingCredits": 950,
+        "timestamp": "2025-06-01T09:07:57.591000+00:00",
+        "creditCost": 50
+      },
+      "subcollections": {}
+    },
+    "7adbf872-4c49-4509-81e7-edb87c9ae842": {
+      "data": {
+        "success": true,
+        "type": "summarize",
+        "actionId": "7adbf872-4c49-4509-81e7-edb87c9ae842",
+        "userId": "eNjLyug8edZLeCYugf3M7pLfJWu2",
+        "summarizeMeta": {
+          "segmentCount": 172,
+          "speechRate": 1.9305575565480484,
+          "summaryLength": 555.2799999999999,
+          "apiCost": 0,
+          "tokenUsage": {
+            "out": 0,
+            "in": 0
+          },
+          "videoId": "0112ff8758ad87a9284e94ef6f294959b51cdea5e1c2fba267ba22fd4d8427b2"
+        },
+        "processingTime": 26809,
+        "remainingCredits": 935,
+        "timestamp": "2025-07-24T08:50:43.300000+00:00",
+        "creditCost": 50
+      },
+      "subcollections": {}
+    },
+    "8f9af516-73ac-4449-a7c5-9d9ace2ac245": {
+      "data": {
+        "success": true,
+        "transcribeMeta": {
+          "videoLength": 0,
+          "duration": 0,
+          "computeDevice": "mps",
+          "videoId": "b30cf36357a32627b293550a4dc68f3d4c49ed5471f8d0363000b40a22c35e78",
+          "speechRate": 2823,
+          "modelSize": "large-v3-turbo",
+          "segmentCount": 396
+        },
+        "type": "transcribe",
+        "actionId": "8f9af516-73ac-4449-a7c5-9d9ace2ac245",
+        "userId": "N6CCb19271QBBjTGpGC6JnnXxZT2",
+        "processingTime": 199594,
+        "remainingCredits": 976,
+        "timestamp": "2025-06-09T16:01:54.809000+00:00",
+        "creditCost": 24
+      },
+      "subcollections": {}
+    },
+    "97a88b98-203a-4e84-bb78-883cd1a1087f": {
+      "data": {
+        "success": true,
+        "type": "summarize",
+        "actionId": "97a88b98-203a-4e84-bb78-883cd1a1087f",
+        "userId": "1zEAC0NX8BbRMOiqN7iCFPqHWtH2",
+        "summarizeMeta": {
+          "segmentCount": 157,
+          "speechRate": 0.6428486787534068,
+          "summaryLength": 337.56,
+          "apiCost": 0,
+          "tokenUsage": {
+            "out": 0,
+            "in": 0
+          },
+          "videoId": "6e6c9ed4ef848e60985cf7a1456d9154f0c7d60756d75a8acbd24ba51515deaa"
+        },
+        "processingTime": 25362,
+        "remainingCredits": 934,
+        "timestamp": "2025-07-24T08:58:52.107000+00:00",
+        "creditCost": 50
+      },
+      "subcollections": {}
+    },
+    "c9f895b4-9205-4641-9329-28ce324a9aa0": {
+      "data": {
+        "success": true,
+        "type": "export",
+        "actionId": "c9f895b4-9205-4641-9329-28ce324a9aa0",
+        "userId": "1zEAC0NX8BbRMOiqN7iCFPqHWtH2",
+        "exportMeta": {
+          "outputUrl": null,
+          "fileSize": null
+        },
+        "processingTime": null,
+        "remainingCredits": null,
+        "timestamp": "2025-07-24T09:04:56.964000+00:00",
+        "creditCost": null
+      },
+      "subcollections": {}
+    },
+    "ceaa4799-997f-43de-af8d-817f71a35f52": {
+      "data": {
+        "success": true,
+        "transcribeMeta": {
+          "videoLength": 987.011,
+          "duration": 987.011,
+          "computeDevice": "mps",
+          "videoId": "6e6c9ed4ef848e60985cf7a1456d9154f0c7d60756d75a8acbd24ba51515deaa",
+          "speechRate": 0.559264283782045,
+          "modelSize": "large-v3-turbo",
+          "segmentCount": 364
+        },
+        "type": "transcribe",
+        "actionId": "ceaa4799-997f-43de-af8d-817f71a35f52",
+        "userId": "1zEAC0NX8BbRMOiqN7iCFPqHWtH2",
+        "processingTime": 682198,
+        "remainingCredits": 984,
+        "timestamp": "2025-07-24T08:56:57.987000+00:00",
+        "creditCost": 16
+      },
+      "subcollections": {}
+    }
+  },
+  "surveys": {
+    "2iu0AaP2bdMaQwJNzD9X": {
+      "data": {
+        "job": "마케터",
+        "tasks": [
+          "숏폼 컨텐츠 제작"
+        ],
+        "email": "jerry@mond.io.kr",
+        "timestamp": "2025-07-24T08:39:07.137000+00:00"
+      },
+      "subcollections": {}
+    },
+    "2nVyexAf6xZti125ML5u": {
+      "data": {
+        "job": "영상 편집자",
+        "tasks": [
+          "러프컷 생성",
+          "하이라이트 영상 제작"
+        ],
+        "email": "kyulnam@gmail.com",
+        "timestamp": "2025-05-31T22:52:11.711000+00:00"
+      },
+      "subcollections": {}
+    },
+    "7nHLwMa30g2ZzLm96NG2": {
+      "data": {
+        "job": "영상 편집자",
+        "tasks": [
+          "러프컷 생성",
+          "불필요한 공백 제거",
+          "자막 제작",
+          "자막생성!!"
+        ],
+        "email": "tti0506@naver.com",
+        "timestamp": "2025-05-31T21:13:22.346000+00:00"
+      },
+      "subcollections": {}
+    },
+    "ADSy5ptyCE12j1d7JKsQ": {
+      "data": {
+        "job": "개인 사용",
+        "tasks": [
+          "숏폼 컨텐츠 제작"
+        ],
+        "email": "kkpark9352@gmail.com",
+        "timestamp": "2025-07-24T08:40:37.962000+00:00"
+      },
+      "subcollections": {}
+    },
+    "GizgHlSLqTqSVDHyQcuQ": {
+      "data": {
+        "job": "취미활동",
+        "tasks": [
+          "하이라이트 영상 제작"
+        ],
+        "email": "yckyck10004@gmail.com",
+        "timestamp": "2025-07-27T07:49:00.419000+00:00"
+      },
+      "subcollections": {}
+    },
+    "Jv6esuakSAIcL8qiixhS": {
+      "data": {
+        "job": "영상 편집자",
+        "tasks": [
+          "러프컷 생성"
+        ],
+        "email": "tti0506@naver.com",
+        "timestamp": "2025-06-12T17:00:04.364000+00:00"
+      },
+      "subcollections": {}
+    },
+    "QkQhOfIakGuQLraKCZAU": {
+      "data": {
+        "job": "크리에이터",
+        "tasks": [
+          "러프컷 생성",
+          "하이라이트 영상 제작"
+        ],
+        "email": "litez@naver.com",
+        "timestamp": "2025-06-01T03:55:18.228000+00:00"
+      },
+      "subcollections": {}
+    },
+    "XNrFgxAwvN0N8Lykv1wR": {
+      "data": {
+        "job": "영상 편집자",
+        "tasks": [
+          "러프컷 생성"
+        ],
+        "email": "woojoomagic@gmail.com",
+        "timestamp": "2025-06-18T01:30:56.259000+00:00"
+      },
+      "subcollections": {}
+    },
+    "Y0OVUgEuipxU484M8bg1": {
+      "data": {
+        "job": "크리에이터",
+        "tasks": [
+          "러프컷 생성",
+          "하이라이트 영상 제작"
+        ],
+        "email": "pnj1988@naver.com",
+        "timestamp": "2025-06-01T00:09:18.584000+00:00"
+      },
+      "subcollections": {}
+    },
+    "fojYAmTl1ZMOFbM23Kpx": {
+      "data": {
+        "job": "크리에이터",
+        "tasks": [
+          "하이라이트 영상 제작"
+        ],
+        "email": "dyjoung0505@gmail.com",
+        "timestamp": "2025-06-01T07:58:36.230000+00:00"
+      },
+      "subcollections": {}
+    },
+    "syTEJtR42JTifF19EHgp": {
+      "data": {
+        "job": "영상 편집자",
+        "tasks": [
+          "홍보하고 계신 글을 보고 테스트차 가입하게 되었습니다 :)"
+        ],
+        "email": "lihbest1@gmail.com",
+        "timestamp": "2025-06-10T12:31:42.456000+00:00"
+      },
+      "subcollections": {}
+    },
+    "uDtdENIud3J8ewVmL1rv": {
+      "data": {
+        "job": "크리에이터",
+        "tasks": [
+          "러프컷 생성",
+          "하이라이트 영상 제작",
+          "숏폼 컨텐츠 제작",
+          "불필요한 공백 제거",
+          "자막 제작"
+        ],
+        "email": "imnotcut@gmail.com",
+        "timestamp": "2025-07-24T08:41:52.035000+00:00"
+      },
+      "subcollections": {}
+    },
+    "xc23pDP86tfmXHYrcNg9": {
+      "data": {
+        "job": "영상 편집자",
+        "tasks": [
+          "러프컷 생성"
+        ],
+        "email": "saedin@naver.com",
+        "timestamp": "2025-06-09T15:43:19.170000+00:00"
+      },
+      "subcollections": {}
+    }
+  },
+  "updates": {
+    "latest": {
+      "data": {
+        "version_mac": "1.0.0",
+        "url_win": "https://bestcut-updates.web.app/updates.json",
+        "url_mac": "https://bestcut-updates.web.app/updates.json",
+        "version_win": "1.0.0"
+      },
+      "subcollections": {}
+    }
+  },
+  "users": {
+    "1Db5CsGoGySJ3oQ0Inw4f2W15Ab2": {
+      "data": {
+        "credits": 1000,
+        "createdAt": "2025-07-27T07:49:49.059000+00:00",
+        "available": true,
+        "email": "yckyck10004@gmail.com",
+        "lastLogin": "2025-07-27T07:49:49.059000+00:00"
+      },
+      "subcollections": {}
+    },
+    "1ksB4qk7xfdL8iWwoYl3yR5QOPf2": {
+      "data": {
+        "available": true,
+        "createdAt": "2025-05-24T13:33:10.931000+00:00",
+        "credits": 8053,
+        "email": "tti0506@gmail.com",
+        "lastLogin": "2025-06-12T16:59:15.878000+00:00"
+      },
+      "subcollections": {}
+    },
+    "1zEAC0NX8BbRMOiqN7iCFPqHWtH2": {
+      "data": {
+        "available": true,
+        "createdAt": "2025-07-24T08:44:14.956000+00:00",
+        "credits": 934,
+        "email": "imnotcut@gmail.com",
+        "lastLogin": "2025-07-24T09:05:09.781000+00:00"
+      },
+      "subcollections": {}
+    },
+    "N6CCb19271QBBjTGpGC6JnnXxZT2": {
+      "data": {
+        "available": true,
+        "createdAt": "2025-06-09T15:44:14.178000+00:00",
+        "credits": 976,
+        "email": "saedin@naver.com",
+        "lastLogin": "2025-06-09T15:44:14.178000+00:00"
+      },
+      "subcollections": {}
+    },
+    "PBvc1EjOq6c0dm0RwXPKsxpmixC2": {
+      "data": {
+        "available": true,
+        "createdAt": "2025-06-01T03:55:42.140000+00:00",
+        "credits": 950,
+        "email": "litez@naver.com",
+        "lastLogin": "2025-06-01T09:07:02.280000+00:00"
+      },
+      "subcollections": {}
+    },
+    "YxG1jxTJSwNaZXL2WZgYW0H5IaD2": {
+      "data": {
+        "credits": 1000,
+        "createdAt": "2025-07-24T08:43:06.849000+00:00",
+        "available": true,
+        "email": "jerry@mond.io.kr",
+        "lastLogin": "2025-07-24T08:43:06.849000+00:00"
+      },
+      "subcollections": {}
+    },
+    "aRfilY87B7M5pFNtHpadf67YWvj2": {
+      "data": {
+        "credits": 1000,
+        "createdAt": "2025-05-31T22:53:04.729000+00:00",
+        "available": true,
+        "email": "kyulnam@gmail.com",
+        "lastLogin": "2025-06-01T12:04:37.256000+00:00"
+      },
+      "subcollections": {}
+    },
+    "auEiAYTBShVvCof1dXbeY9uBWVZ2": {
+      "data": {
+        "credits": 1000,
+        "createdAt": "2025-06-02T04:44:48.772000+00:00",
+        "available": true,
+        "email": "dyjoung0505@gmail.com",
+        "lastLogin": "2025-06-02T04:44:48.772000+00:00"
+      },
+      "subcollections": {}
+    },
+    "eNjLyug8edZLeCYugf3M7pLfJWu2": {
+      "data": {
+        "available": true,
+        "createdAt": "2025-07-24T08:42:39.537000+00:00",
+        "credits": 885,
+        "email": "kkpark9352@gmail.com",
+        "lastLogin": "2025-07-25T01:04:18.950000+00:00"
+      },
+      "subcollections": {}
+    },
+    "nddO55kmtfe0WG5lPgFvEdM3iLv1": {
+      "data": {
+        "available": true,
+        "createdAt": "2025-06-12T17:00:33.147000+00:00",
+        "credits": 948,
+        "email": "tti0506@naver.com",
+        "lastLogin": "2025-08-14T04:18:33.438000+00:00"
+      },
+      "subcollections": {}
+    },
+    "ryFhZlXe1PaagrGrVOcvJvZ0yiK2": {
+      "data": {
+        "credits": 1000,
+        "createdAt": "2025-06-18T01:31:35.336000+00:00",
+        "available": true,
+        "email": "woojoomagic@gmail.com",
+        "lastLogin": "2025-06-18T01:31:35.336000+00:00"
+      },
+      "subcollections": {}
+    },
+    "tgnV6XG0WjaycJX20RuSbpcyjBU2": {
+      "data": {
+        "credits": 1000,
+        "createdAt": "2025-06-10T13:28:22.369000+00:00",
+        "available": true,
+        "email": "lihbest1@gmail.com",
+        "lastLogin": "2025-06-10T13:28:22.369000+00:00"
+      },
+      "subcollections": {}
+    }
+  }
+}
