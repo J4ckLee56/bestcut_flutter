@@ -2419,12 +2419,18 @@ ${jsonEncode(formatted)}
       final segStart = speechRegions.first.startSec;
       final segEnd = speechRegions.last.endSec;
 
-      // 이 세그먼트 범위 내 또는 바로 뒤의 무음 찾기
+      // 다음 세그먼트의 시작 시간 찾기
+      final nextSegmentIds = groupsByOriginalSegment.keys.where((id) => id > segId).toList()..sort();
+      final nextSegStart = nextSegmentIds.isNotEmpty 
+          ? groupsByOriginalSegment[nextSegmentIds.first]!.first.startSec
+          : double.infinity;
+
+      // 이 세그먼트 범위 내 + 다음 세그먼트 전까지의 무음 찾기
       final segmentSilences = regions
           .where((r) => 
               r.type == _RegionType.silence &&
-              ((r.startSec >= segStart && r.endSec <= segEnd) || // 세그먼트 내부
-               (r.startSec >= segEnd && r.startSec < segEnd + 5.0))) // 세그먼트 직후 5초 이내
+              r.startSec >= segStart && // 이 세그먼트 시작 이후
+              r.startSec < nextSegStart) // 다음 세그먼트 시작 전
           .map((r) => r.silenceData!)
           .toList();
 
