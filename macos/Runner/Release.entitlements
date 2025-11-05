@@ -31,6 +31,9 @@
 		<string>/Users/ihuijae/Desktop/Flutter_Workspace/bestcut_flutter/whisper.cpp/models/</string>
 		<string>/opt/homebrew/bin/ffmpeg</string>
 		<string>/usr/local/bin/ffmpeg</string>
+		<string>/Users/ihuijae/Desktop/Flutter_Workspace/bestcut_flutter/venv_whisperx/</string>
+		<string>/Users/ihuijae/Desktop/Flutter_Workspace/bestcut_flutter/tools/audio_pipeline/</string>
+		<string>/Users/ihuijae/Desktop/Flutter_Workspace/bestcut_flutter/hf_cache/</string>
 	</array>
 	<key>keychain-access-groups</key>
 	<array>

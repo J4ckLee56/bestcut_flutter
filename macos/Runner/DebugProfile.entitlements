@@ -30,6 +30,9 @@
 		<string>/Users/ihuijae/Desktop/Flutter_Workspace/bestcut_flutter/whisper.cpp/build/</string>
 		<string>/Users/ihuijae/Desktop/Flutter_Workspace/bestcut_flutter/whisper.cpp/models/</string>
 		<string>/Users/ihuijae/Desktop/Flutter_Workspace/bestcut_flutter/ffmpeg/macos/</string>
+		<string>/Users/ihuijae/Desktop/Flutter_Workspace/bestcut_flutter/venv_whisperx/</string>
+		<string>/Users/ihuijae/Desktop/Flutter_Workspace/bestcut_flutter/tools/audio_pipeline/</string>
+		<string>/Users/ihuijae/Desktop/Flutter_Workspace/bestcut_flutter/hf_cache/</string>
 	</array>
 	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
 	<true/>

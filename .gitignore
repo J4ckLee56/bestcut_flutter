@@ -47,3 +47,9 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Python virtual environment
+venv_whisperx/
+
+# Hugging Face cache
+hf_cache/

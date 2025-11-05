@@ -312,10 +312,23 @@ class AIService {
       
       print('오디오 파일 크기: ${File(audioPath).lengthSync()} bytes');
       
+      // FFmpeg로 오디오 에너지 프로파일 생성
+      print('=== FFmpeg 오디오 에너지 분석 시작 ===');
+      final energyProfile = await _analyzeAudioEnergy(audioPath, ffmpegPath, env);
+      print('에너지 프레임: ${energyProfile.length}개 (${(energyProfile.length * 0.1).toStringAsFixed(1)}초)');
+      
+      // FFmpeg silencedetect로 무음 구간 감지
+      print('=== FFmpeg 무음 구간 감지 시작 ===');
+      final silences = await _detectSilence(audioPath, ffmpegPath, env);
+      print('감지된 무음 구간: ${silences.length}개');
+      for (final silence in silences) {
+        print('  $silence');
+      }
+      
       // 로컬 Whisper 호출
       print('=== 로컬 Whisper 호출 시작 ===');
       
-      final segments = await _callLocalWhisper(audioPath);
+      final segments = await _callLocalWhisper(audioPath, silences, energyProfile);
       
       if (appState.videoPath != currentVideoPath || appState.recognizeSession != session || appState.isOperationCancelled) {
         print('영상이 변경되었거나 작업이 취소되었습니다. 결과 무시.');
@@ -544,33 +557,26 @@ class AIService {
   
 
   /// whisper.cpp 호출 함수 (public)
-  Future<List<WhisperSegment>> callLocalWhisper(String audioPath) async {
+  Future<List<WhisperSegment>> callLocalWhisper(String audioPath, List<SilenceSegment> silences, List<AudioEnergyFrame> energyProfile) async {
     print('=== whisper.cpp 호출 시작 ===');
     
     try {
       // whisper.cpp 실행 파일 경로 설정 (VAD 제거, large-v3-turbo만 사용)
+      final projectRoot = _resolveProjectRoot();
       String whisperCliPath;
       String modelPath;
-      
+
       if (Platform.isMacOS) {
-        // 개발 중에는 프로젝트 디렉토리 사용, 배포 시에는 앱 번들 내부 사용
         final projectDir = Directory.current.path;
         print('현재 디렉토리: $projectDir');
-        
-        // 개발 환경에서는 절대 경로 사용
-        final projectRoot = '/Users/ihuijae/Desktop/Flutter_Workspace/bestcut_flutter';
+        print('프로젝트 루트: $projectRoot');
         whisperCliPath = '$projectRoot/whisper.cpp/build/bin/whisper-cli';
         modelPath = '$projectRoot/whisper.cpp/models/ggml-large-v3-turbo.bin';
-        print('개발 환경 경로 사용');
       } else if (Platform.isWindows) {
-        final projectDir = Directory.current.path;
-        final projectRoot = 'C:\\Users\\ihuijae\\Desktop\\Flutter_Workspace\\bestcut_flutter';
         if (File('$projectRoot\\whisper.cpp\\build\\bin\\whisper-cli.exe').existsSync()) {
-          // 개발 환경
           whisperCliPath = '$projectRoot\\whisper.cpp\\build\\bin\\whisper-cli.exe';
           modelPath = '$projectRoot\\whisper.cpp\\models\\ggml-large-v3-turbo.bin';
         } else {
-          // 배포 환경
           final exeDir = Directory.current.path;
           whisperCliPath = '$exeDir\\whisper-cli.exe';
           modelPath = '$exeDir\\ggml-large-v3-turbo.bin';
@@ -590,6 +596,8 @@ class AIService {
           '-f', audioPath,
           '-l', 'ko',
           '-osrt',  // SRT 자막 출력
+          '-oj',    // JSON 출력
+          '-owts',  // 단어 타임스탬프 출력
           '-pp',    // 진행률 출력
           '-ml', '0',        // 세그먼트 최대 길이 제한 해제 (0 = 무제한)
           '-sow',            // 토큰이 아닌 단어 기준으로 분할
@@ -618,12 +626,31 @@ class AIService {
       }
       
       final srtContent = File(srtPath).readAsStringSync();
-      final segments = _parseSrtToSegments(srtContent);
+      final baseSegments = _parseSrtToSegments(srtContent);
+
+      List<WhisperSegment> enrichedSegments = baseSegments;
+      try {
+        enrichedSegments = await _alignSegmentsWithWhisperX(
+          audioPath: audioPath,
+          baseSegments: baseSegments,
+          projectRoot: projectRoot,
+        );
+      } catch (alignError) {
+        if (kDebugMode) print('WhisperX 정렬 중 오류: $alignError');
+      }
+
+      print('whisper.cpp 성공: ${enrichedSegments.length}개 세그먼트 (단어 포함=${enrichedSegments.isNotEmpty && enrichedSegments.first.words.isNotEmpty})');
       
-      // 위스퍼 결과물을 그대로 사용 (보정 기능 제거)
-      print('whisper.cpp 성공: ${segments.length}개 세그먼트 (원본 그대로 사용)');
+      // 에너지 프로파일 기반 단어 타임스탬프 정밀 조정
+      print('=== 단어 타임스탬프 정밀 조정 시작 ===');
+      final refinedSegments = _refineWordTimestamps(enrichedSegments, energyProfile);
+      print('타임스탬프 정밀 조정 완료');
       
-      return segments;
+      // 무음 구간 정보를 세그먼트에 통합
+      final segmentsWithSilence = _integrateSilenceIntoSegments(refinedSegments, silences);
+      print('무음 정보 통합 완료');
+      
+      return segmentsWithSilence;
       
     } catch (e) {
       print('whisper.cpp 호출 중 오류: $e');
@@ -632,8 +659,8 @@ class AIService {
   }
 
   // whisper.cpp 호출 함수 (private - 내부용)
-  Future<List<WhisperSegment>> _callLocalWhisper(String audioPath) async {
-    return callLocalWhisper(audioPath);
+  Future<List<WhisperSegment>> _callLocalWhisper(String audioPath, List<SilenceSegment> silences, List<AudioEnergyFrame> energyProfile) async {
+    return callLocalWhisper(audioPath, silences, energyProfile);
   }
 
   // SRT 파일을 WhisperSegment로 파싱하는 함수
@@ -672,8 +699,8 @@ class AIService {
       if (line.contains(' --> ')) {
         final parts = line.split(' --> ');
         if (parts.length == 2) {
-                  currentStart = _srtTimeToSeconds(parts[0].trim()).toStringAsFixed(2);
-        currentEnd = _srtTimeToSeconds(parts[1].trim()).toStringAsFixed(2);
+          currentStart = _srtTimeToSeconds(parts[0].trim()).toString();
+          currentEnd = _srtTimeToSeconds(parts[1].trim()).toString();
         }
         continue;
       }
@@ -698,6 +725,271 @@ class AIService {
     }
     
     return segments;
+  }
+
+
+  Future<List<WhisperSegment>> _alignSegmentsWithWhisperX({
+    required String audioPath,
+    required List<WhisperSegment> baseSegments,
+    required String projectRoot,
+  }) async {
+    _checkCancellation();
+
+    final whisperJsonPath = '$audioPath.json';
+    if (!File(whisperJsonPath).existsSync()) {
+      if (kDebugMode) print('Whisper JSON 파일이 없어 정렬을 건너뜁니다: $whisperJsonPath');
+      return baseSegments;
+    }
+
+    final originalScriptPath = '$projectRoot/tools/audio_pipeline/align_with_whisperx.py';
+    if (!File(originalScriptPath).existsSync()) {
+      if (kDebugMode) print('WhisperX 스크립트를 찾을 수 없어 정렬을 건너뜁니다: $originalScriptPath');
+      return baseSegments;
+    }
+
+    final pythonExec = _findPythonExecutable(projectRoot);
+    if (pythonExec == null) {
+      if (kDebugMode) print('Python 실행 파일을 찾을 수 없습니다. 정렬을 건너뜁니다.');
+      return baseSegments;
+    }
+
+    final sandboxTempDir = await Directory.systemTemp.createTemp('whisperx_align_');
+    final tempScriptPath = '${sandboxTempDir.path}/align_with_whisperx.py';
+    try {
+      await File(originalScriptPath).copy(tempScriptPath);
+    } catch (e) {
+      if (kDebugMode) print('WhisperX 스크립트 복사 실패: $e');
+      return baseSegments;
+    }
+
+    final alignedJsonPath = '$audioPath.aligned.json';
+    final alignedVttPath = '$audioPath.aligned.vtt';
+
+    final env = Map<String, String>.from(Platform.environment);
+    final cacheDir = Directory('$projectRoot/hf_cache');
+    if (cacheDir.existsSync()) {
+      env['XDG_CACHE_HOME'] = cacheDir.path;
+      env['HF_HOME'] = '${cacheDir.path}/huggingface';
+      final hubCache = '${cacheDir.path}/huggingface/hub';
+      env['HF_HUB_CACHE'] = hubCache;
+      env['HUGGINGFACE_HUB_CACHE'] = hubCache;
+      env['HF_DATASETS_CACHE'] = '${cacheDir.path}/datasets';
+      env['TRANSFORMERS_CACHE'] = '${cacheDir.path}/transformers';
+      env['HF_HUB_OFFLINE'] = '1';
+      env['TRANSFORMERS_OFFLINE'] = '1';
+    }
+
+    try {
+      final ffmpegPath = _findFfmpegPath();
+      final ffmpegDir = File(ffmpegPath).parent.path;
+      final existingPath = env['PATH'] ?? Platform.environment['PATH'] ?? '';
+      env['PATH'] = '$ffmpegDir:$existingPath';
+      env['FFMPEG_PATH'] = ffmpegPath;
+
+      final resourcesPath = _getAppResourcesPath();
+      final existingDyld = env['DYLD_LIBRARY_PATH'] ?? Platform.environment['DYLD_LIBRARY_PATH'] ?? '';
+      final existingFramework = env['DYLD_FRAMEWORK_PATH'] ?? Platform.environment['DYLD_FRAMEWORK_PATH'] ?? '';
+      env['DYLD_LIBRARY_PATH'] = [resourcesPath, existingDyld].where((e) => e.isNotEmpty).join(':');
+      env['DYLD_FRAMEWORK_PATH'] = [resourcesPath, existingFramework].where((e) => e.isNotEmpty).join(':');
+    } catch (_) {
+      // ignore if ffmpeg path is not available here
+    }
+
+    final args = <String>[
+      tempScriptPath,
+      '--audio', audioPath,
+      '--whisper-json', whisperJsonPath,
+      '--output-json', alignedJsonPath,
+      '--output-vtt', alignedVttPath,
+      '--language', 'ko',
+      '--device', 'cpu',
+    ];
+    if (cacheDir.existsSync()) {
+      args.addAll(['--model-cache', cacheDir.path, '--align-model', 'kresnik/wav2vec2-large-xlsr-korean']);
+    }
+
+    ProcessResult result;
+    try {
+      result = await Process.run(
+        pythonExec,
+        args,
+        workingDirectory: sandboxTempDir.path,
+        environment: env,
+      );
+    } finally {
+      try {
+        sandboxTempDir.deleteSync(recursive: true);
+      } catch (_) {}
+    }
+
+    _checkCancellation();
+
+    if (result.exitCode != 0) {
+      if (kDebugMode) {
+        print('WhisperX 정렬 실패 (${result.exitCode}): ${result.stderr}');
+      }
+      return baseSegments;
+    }
+
+    final alignedFile = File(alignedJsonPath);
+    if (!alignedFile.existsSync()) {
+      if (kDebugMode) print('WhisperX 정렬 결과 파일을 찾을 수 없습니다.');
+      return baseSegments;
+    }
+
+    try {
+      final data = jsonDecode(alignedFile.readAsStringSync());
+      final segmentsData = data['segments'];
+      if (segmentsData is! List) {
+        if (kDebugMode) print('WhisperX 정렬 데이터 형식이 올바르지 않습니다.');
+        return baseSegments;
+      }
+
+      final List<WhisperSegment> alignedSegments = [];
+      for (int i = 0; i < segmentsData.length; i++) {
+        final seg = segmentsData[i];
+        if (seg is! Map<String, dynamic>) continue;
+
+        final fallback = _segmentAt(baseSegments, i);
+        final start = _asDouble(seg['start'], fallback: fallback?.startSec ?? 0.0);
+        final end = _asDouble(seg['end'], fallback: fallback?.endSec ?? start);
+        final rawText = (seg['text'] as String?)?.trim();
+
+        final wordsData = seg['words'] as List<dynamic>? ?? const [];
+        final List<WordSegment> wordSegments = [];
+        double scoreSum = 0;
+        int index = 0;
+        for (final item in wordsData) {
+          if (item is! Map<String, dynamic>) continue;
+          final wordText = (item['word'] as String?)?.trim();
+          if (wordText == null || wordText.isEmpty) continue;
+          final wordStart = _asDouble(item['start'], fallback: start);
+          final wordEnd = _asDouble(item['end'], fallback: end);
+          final score = _asDouble(item['score'], fallback: 1.0);
+          scoreSum += score;
+          wordSegments.add(WordSegment(
+            index: index,
+            word: wordText,
+            startSec: wordStart,
+            endSec: wordEnd,
+            score: score,
+          ));
+          index++;
+        }
+
+        double adjustedStart = start;
+        double adjustedEnd = end;
+        if (wordSegments.isNotEmpty) {
+          adjustedStart = wordSegments.first.startSec;
+          adjustedEnd = wordSegments.last.endSec;
+        }
+
+        final reconstructedText = wordSegments.isNotEmpty
+            ? _reconstructTextFromWords(wordSegments)
+            : null;
+
+        final text = reconstructedText?.isNotEmpty == true
+            ? reconstructedText!
+            : (rawText?.isNotEmpty == true
+                ? rawText!
+                : fallback?.text ?? '');
+
+        final confidence = wordSegments.isEmpty
+            ? (seg['avg_logprob'] is num
+                ? (seg['avg_logprob'] as num).toDouble()
+                : fallback?.confidence ?? 1.0)
+            : scoreSum / wordSegments.length;
+
+        alignedSegments.add(WhisperSegment(
+          id: fallback?.id ?? (alignedSegments.length + 1),
+          startSec: adjustedStart,
+          endSec: adjustedEnd,
+          text: text,
+          confidence: confidence,
+          isSummary: fallback?.isSummary,
+          words: wordSegments.isNotEmpty ? wordSegments : (fallback?.words ?? const []),
+        ));
+      }
+
+      if (alignedSegments.isEmpty) {
+        if (kDebugMode) print('WhisperX 정렬 결과가 비어 있습니다.');
+        return baseSegments;
+      }
+
+      alignedSegments.sort((a, b) => a.startSec.compareTo(b.startSec));
+      return alignedSegments;
+    } catch (e) {
+      if (kDebugMode) print('WhisperX 정렬 JSON 파싱 실패: $e');
+      return baseSegments;
+    }
+  }
+
+  double _asDouble(dynamic value, {required double fallback}) {
+    if (value == null) return fallback;
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+    if (value is num) return value.toDouble();
+    if (value is String) {
+      final normalized = value.replaceAll(',', '.');
+      final parsed = double.tryParse(normalized);
+      if (parsed != null) return parsed;
+    }
+    return fallback;
+  }
+
+  WhisperSegment? _segmentAt(List<WhisperSegment> segments, int index) {
+    if (index < 0 || index >= segments.length) return null;
+    return segments[index];
+  }
+
+  String _resolveProjectRoot() {
+    final envRoot = Platform.environment['BESTCUT_PROJECT_ROOT'];
+    if (envRoot != null && File('$envRoot/pubspec.yaml').existsSync()) {
+      return envRoot;
+    }
+
+    final current = Directory.current.path;
+    if (File('$current/pubspec.yaml').existsSync()) {
+      return current;
+    }
+
+    final executableDir = File(Platform.resolvedExecutable).parent;
+    final candidates = <String>{
+      current,
+      executableDir.path,
+      executableDir.parent.path,
+      '/Users/ihuijae/Desktop/Flutter_Workspace/bestcut_flutter',
+    };
+
+    for (final path in candidates) {
+      if (path.isEmpty) continue;
+      if (File('$path/pubspec.yaml').existsSync()) {
+        return path;
+      }
+    }
+
+    return current;
+  }
+
+  String? _findPythonExecutable(String projectRoot) {
+    final candidates = <String>[
+      '$projectRoot/venv_whisperx/bin/python3',
+      '$projectRoot/venv_whisperx/bin/python',
+      'python3',
+    ];
+
+    for (final candidate in candidates) {
+      if (candidate.contains('/')) {
+        if (File(candidate).existsSync()) {
+          return candidate;
+        }
+      } else {
+        // 명령어 형태는 그대로 반환 (PATH 활용)
+        return candidate;
+      }
+    }
+
+    return null;
   }
 
 
@@ -1669,6 +1961,351 @@ ${jsonEncode(formatted)}
     // 예: /path/to/app.app/Contents/MacOS/bestcut_flutter -> /path/to/app.app/Contents/Resources
     return executablePath.replaceAll('/MacOS/bestcut_flutter', '/Resources');
   }
+
+  // Python으로 오디오 에너지 프로파일 생성 (100ms 간격)
+  Future<List<AudioEnergyFrame>> _analyzeAudioEnergy(String audioPath, String ffmpegPath, Map<String, String> env) async {
+    print('📊 Python 오디오 에너지 분석 실행 중...');
+    
+    final projectRoot = _resolveProjectRoot();
+    final pythonExec = _findPythonExecutable(projectRoot);
+    
+    if (pythonExec == null) {
+      print('⚠️ Python 실행 파일을 찾을 수 없어 에너지 분석을 건너뜁니다.');
+      return [];
+    }
+
+    final scriptPath = '$projectRoot/tools/audio_pipeline/analyze_audio_energy.py';
+    if (!File(scriptPath).existsSync()) {
+      print('⚠️ 에너지 분석 스크립트를 찾을 수 없어 건너뜁니다: $scriptPath');
+      return [];
+    }
+
+    final energyJsonPath = '$audioPath.energy.json';
+
+    final result = await Process.run(
+      pythonExec,
+      [
+        scriptPath,
+        '--audio', audioPath,
+        '--output-json', energyJsonPath,
+        '--frame-length', '0.1',
+        '--silence-threshold', '-40.0',
+      ],
+      environment: env,
+    );
+
+    if (result.exitCode != 0) {
+      print('⚠️ 에너지 분석 실패 (${result.exitCode}): ${result.stderr}');
+      return [];
+    }
+
+    if (kDebugMode) {
+      print('Python 출력: ${result.stdout}');
+    }
+
+    // JSON 파일 읽기
+    final energyFile = File(energyJsonPath);
+    if (!energyFile.existsSync()) {
+      print('⚠️ 에너지 프로파일 파일을 찾을 수 없습니다.');
+      return [];
+    }
+
+    try {
+      final data = jsonDecode(energyFile.readAsStringSync());
+      final framesData = data['frames'] as List<dynamic>;
+      
+      final frames = framesData.map((item) {
+        final map = item as Map<String, dynamic>;
+        return AudioEnergyFrame(
+          timeSec: (map['timeSec'] as num).toDouble(),
+          rmsLevel: (map['rmsLevel'] as num).toDouble(),
+        );
+      }).toList();
+
+      print('✅ 에너지 프레임 ${frames.length}개 생성 완료');
+      if (frames.isNotEmpty) {
+        print('  첫 프레임: ${frames.first}');
+        print('  마지막 프레임: ${frames.last}');
+      }
+      
+      return frames;
+    } catch (e) {
+      print('⚠️ 에너지 프로파일 JSON 파싱 실패: $e');
+      return [];
+    }
+  }
+
+  // FFmpeg silencedetect로 무음 구간 감지
+  Future<List<SilenceSegment>> _detectSilence(String audioPath, String ffmpegPath, Map<String, String> env) async {
+    print('🔇 FFmpeg silencedetect 실행 중...');
+    
+    final result = await Process.run(
+      ffmpegPath,
+      [
+        '-i', audioPath,
+        '-af', 'silencedetect=n=-30dB:d=0.3', // -30dB 이하, 0.3초 이상
+        '-f', 'null',
+        '-'
+      ],
+      environment: env,
+      workingDirectory: _getAppResourcesPath(),
+    );
+
+    final List<SilenceSegment> silences = [];
+    final output = result.stderr as String;
+
+    // silence_start와 silence_end 파싱
+    final startRegex = RegExp(r'silence_start: ([\d.]+)');
+    final endRegex = RegExp(r'silence_end: ([\d.]+) \| silence_duration: ([\d.]+)');
+
+    double? currentStart;
+    
+    for (final line in output.split('\n')) {
+      final startMatch = startRegex.firstMatch(line);
+      if (startMatch != null) {
+        currentStart = double.parse(startMatch.group(1)!);
+        continue;
+      }
+
+      final endMatch = endRegex.firstMatch(line);
+      if (endMatch != null && currentStart != null) {
+        final end = double.parse(endMatch.group(1)!);
+        final duration = double.parse(endMatch.group(2)!);
+        
+        silences.add(SilenceSegment(
+          startSec: currentStart,
+          endSec: end,
+          duration: duration,
+        ));
+        
+        currentStart = null;
+      }
+    }
+
+    print('✅ 무음 구간 ${silences.length}개 감지 완료');
+    return silences;
+  }
+
+  // 에너지 프로파일 기반 단어 타임스탬프 정밀 조정
+  List<WhisperSegment> _refineWordTimestamps(
+    List<WhisperSegment> segments,
+    List<AudioEnergyFrame> energyProfile,
+  ) {
+    if (energyProfile.isEmpty) {
+      print('⚠️ 에너지 프로파일이 비어있어 타임스탬프 조정을 건너뜁니다.');
+      return segments;
+    }
+
+    final List<WhisperSegment> result = [];
+    double? globalPreviousEnd; // 전체 세그먼트 간 중복 방지
+
+    for (final segment in segments) {
+      if (segment.words.isEmpty) {
+        result.add(segment);
+        continue;
+      }
+
+      final List<WordSegment> refinedWords = [];
+      double? previousWordEnd;
+      
+      for (int i = 0; i < segment.words.length; i++) {
+        final word = segment.words[i];
+        
+        // WhisperX가 제공한 대략적인 시간
+        final approximateStart = word.startSec;
+        final approximateEnd = word.endSec;
+
+        // 에너지 기반으로 실제 발화 시작/끝 찾기
+        double actualStart = _findActualWordStart(approximateStart, energyProfile);
+        double actualEnd = _findActualWordEnd(approximateEnd, energyProfile);
+
+        // 중요1: 이전 단어와 겹치지 않도록 조정 (같은 세그먼트 내)
+        if (previousWordEnd != null && actualStart < previousWordEnd) {
+          actualStart = previousWordEnd; // 이전 단어 끝 시간부터 시작
+          if (kDebugMode) {
+            print('  ⚠️ 단어 "${word.word}": 세그먼트 내 충돌 방지 (${word.startSec.toStringAsFixed(2)}s → ${actualStart.toStringAsFixed(2)}s)');
+          }
+        }
+
+        // 중요2: 이전 세그먼트와 겹치지 않도록 조정 (세그먼트 간)
+        if (globalPreviousEnd != null && actualStart < globalPreviousEnd) {
+          actualStart = globalPreviousEnd;
+          if (kDebugMode) {
+            print('  ⚠️ 단어 "${word.word}": 세그먼트 간 충돌 방지 (${word.startSec.toStringAsFixed(2)}s → ${actualStart.toStringAsFixed(2)}s)');
+          }
+        }
+
+        // 시작이 끝보다 늦으면 안됨
+        if (actualStart >= actualEnd) {
+          actualEnd = actualStart + 0.1; // 최소 100ms 지속
+        }
+
+        refinedWords.add(WordSegment(
+          index: word.index,
+          word: word.word,
+          startSec: actualStart,
+          endSec: actualEnd,
+          score: word.score,
+        ));
+
+        if (kDebugMode && (actualStart - approximateStart).abs() > 0.1) {
+          print('  단어 "${word.word}": ${approximateStart.toStringAsFixed(2)}s → ${actualStart.toStringAsFixed(2)}s (시작 조정)');
+        }
+        if (kDebugMode && (actualEnd - approximateEnd).abs() > 0.1) {
+          print('  단어 "${word.word}": ${approximateEnd.toStringAsFixed(2)}s → ${actualEnd.toStringAsFixed(2)}s (끝 조정)');
+        }
+
+        previousWordEnd = actualEnd;
+      }
+
+      // 조정된 단어들로 세그먼트 재구성
+      final adjustedStart = refinedWords.isNotEmpty ? refinedWords.first.startSec : segment.startSec;
+      final adjustedEnd = refinedWords.isNotEmpty ? refinedWords.last.endSec : segment.endSec;
+
+      if (kDebugMode) {
+        print('세그먼트 ${segment.id}: ${adjustedStart.toStringAsFixed(2)}s - ${adjustedEnd.toStringAsFixed(2)}s');
+        if (globalPreviousEnd != null && adjustedStart < globalPreviousEnd) {
+          print('  ⚠️⚠️ 세그먼트 겹침 감지! 이전 끝: ${globalPreviousEnd.toStringAsFixed(2)}s, 현재 시작: ${adjustedStart.toStringAsFixed(2)}s');
+        }
+      }
+
+      result.add(segment.copyWith(
+        words: refinedWords,
+        startSec: adjustedStart,
+        endSec: adjustedEnd,
+      ));
+
+      // 전체 세그먼트 간 중복 방지를 위해 이 세그먼트의 끝 시간 저장
+      globalPreviousEnd = adjustedEnd;
+    }
+
+    return result;
+  }
+
+  // 에너지 프로파일에서 실제 단어 시작 지점 찾기
+  double _findActualWordStart(double approximateStart, List<AudioEnergyFrame> energyProfile) {
+    const double searchWindow = 0.3; // 앞뒤로 300ms 탐색
+    const double voiceThreshold = -40.0; // -40dB 이상은 음성으로 판단
+
+    // 탐색 범위
+    final searchStart = approximateStart - searchWindow;
+    final searchEnd = approximateStart + searchWindow;
+
+    // 탐색 범위 내의 프레임들
+    final relevantFrames = energyProfile.where((frame) =>
+      frame.timeSec >= searchStart && frame.timeSec <= searchEnd
+    ).toList();
+
+    if (relevantFrames.isEmpty) return approximateStart;
+
+    // 음성이 시작되는 첫 지점 찾기 (에너지가 임계값 이상 올라가는 지점)
+    for (final frame in relevantFrames) {
+      if (frame.rmsLevel >= voiceThreshold) {
+        return frame.timeSec;
+      }
+    }
+
+    return approximateStart; // 찾지 못하면 원래 값 유지
+  }
+
+  // 에너지 프로파일에서 실제 단어 끝 지점 찾기
+  double _findActualWordEnd(double approximateEnd, List<AudioEnergyFrame> energyProfile) {
+    const double searchWindow = 0.3; // 앞뒤로 300ms 탐색
+    const double voiceThreshold = -40.0; // -40dB 이상은 음성으로 판단
+
+    // 탐색 범위
+    final searchStart = approximateEnd - searchWindow;
+    final searchEnd = approximateEnd + searchWindow;
+
+    // 탐색 범위 내의 프레임들 (역순으로)
+    final relevantFrames = energyProfile.where((frame) =>
+      frame.timeSec >= searchStart && frame.timeSec <= searchEnd
+    ).toList().reversed.toList();
+
+    if (relevantFrames.isEmpty) return approximateEnd;
+
+    // 음성이 끝나는 지점 찾기 (에너지가 임계값 이하로 떨어지는 지점)
+    for (final frame in relevantFrames) {
+      if (frame.rmsLevel >= voiceThreshold) {
+        return frame.timeSec;
+      }
+    }
+
+    return approximateEnd; // 찾지 못하면 원래 값 유지
+  }
+
+  // 무음 구간 정보를 세그먼트에 통합
+  List<WhisperSegment> _integrateSilenceIntoSegments(
+    List<WhisperSegment> segments,
+    List<SilenceSegment> allSilences,
+  ) {
+    final List<WhisperSegment> result = [];
+
+    if (kDebugMode) {
+      print('=== 무음 통합 시작 ===');
+      print('전체 무음: ${allSilences.length}개');
+      for (final silence in allSilences) {
+        print('  무음: ${silence.startSec.toStringAsFixed(2)}s - ${silence.endSec.toStringAsFixed(2)}s (${silence.duration.toStringAsFixed(2)}s)');
+      }
+      
+      // 세그먼트 범위 출력
+      if (segments.isNotEmpty) {
+        print('세그먼트 범위: ${segments.first.startSec.toStringAsFixed(2)}s ~ ${segments.last.endSec.toStringAsFixed(2)}s');
+      }
+    }
+
+    // 중복 할당 방지를 위한 Set
+    final assignedSilences = <SilenceSegment>{};
+
+    for (int i = 0; i < segments.length; i++) {
+      final segment = segments[i];
+      
+      // 이 세그먼트 구간과 겹치는 모든 무음들을 찾기
+      final segmentSilences = <SilenceSegment>[];
+      
+      for (final silence in allSilences) {
+        // 이미 다른 세그먼트에 할당되었으면 건너뛰기
+        if (assignedSilences.contains(silence)) {
+          continue;
+        }
+        
+        // 무음이 세그먼트와 겹치는지 확인
+        final overlaps = (silence.startSec < segment.endSec && silence.endSec > segment.startSec);
+        
+        if (overlaps) {
+          segmentSilences.add(silence);
+          assignedSilences.add(silence);
+          
+          if (kDebugMode) {
+            print('  세그먼트 ${segment.id} (${segment.startSec.toStringAsFixed(2)}s-${segment.endSec.toStringAsFixed(2)}s) ← 무음: ${silence.startSec.toStringAsFixed(2)}s-${silence.endSec.toStringAsFixed(2)}s');
+          }
+        }
+      }
+
+      // 새로운 세그먼트 생성 (무음 정보 포함)
+      result.add(segment.copyWith(silences: segmentSilences));
+      
+      if (kDebugMode && segmentSilences.isNotEmpty) {
+        print('세그먼트 ${segment.id} 총 무음: ${segmentSilences.length}개');
+      }
+    }
+
+    if (kDebugMode) {
+      print('=== 무음 통합 완료 ===');
+      print('할당된 총 무음: ${assignedSilences.length}개 / 전체 ${allSilences.length}개');
+      
+      // 할당 안 된 무음 확인
+      final unassignedSilences = allSilences.where((s) => !assignedSilences.contains(s)).toList();
+      if (unassignedSilences.isNotEmpty) {
+        print('⚠️ 할당 안 된 무음: ${unassignedSilences.length}개');
+        for (final silence in unassignedSilences) {
+          print('  미할당 무음: ${silence.startSec.toStringAsFixed(2)}s-${silence.endSec.toStringAsFixed(2)}s');
+        }
+      }
+    }
+
+    return result;
+  }
   
   // SRT 시간을 초 단위로 변환
   double _srtTimeToSeconds(String srtTime) {
@@ -1927,6 +2564,42 @@ ${jsonEncode(formatted)}
     
     // ```json이 없으면 원본 반환
     return content.trim();
+  }
+
+  String? _reconstructTextFromWords(List<WordSegment> words) {
+    if (words.isEmpty) return null;
+    final buffer = StringBuffer();
+    for (var i = 0; i < words.length; i++) {
+      final token = words[i].word.trim();
+      if (token.isEmpty) continue;
+
+      if (buffer.isEmpty) {
+        buffer.write(token);
+        continue;
+      }
+
+      if (_shouldAttachWithoutSpace(token)) {
+        buffer.write(token);
+      } else if (_isSuffixPunctuation(token)) {
+        buffer.write(token);
+      } else {
+        buffer.write(' ');
+        buffer.write(token);
+      }
+    }
+
+    return buffer.toString().replaceAll(' ,', ',').replaceAll(' .', '.').trim();
+  }
+
+  bool _shouldAttachWithoutSpace(String token) {
+    const prefixes = ['%', "'", '"', ')', '}', ']', '…'];
+    return prefixes.contains(token);
+  }
+
+  bool _isSuffixPunctuation(String token) {
+    if (token.length > 2) return false;
+    const suffixes = ['.', ',', '!', '?', ')', ']', '}', ':', ';', '…'];
+    return suffixes.contains(token);
   }
 
 }

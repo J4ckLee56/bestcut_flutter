@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/app_state.dart';
+import '../models/whisper_segment.dart';
 import '../utils/constants.dart';
 import '../utils/ui_constants.dart';
 import '../theme/cursor_theme.dart';
@@ -218,9 +219,12 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
   // 개선된 세그먼트 아이템 빌더
   Widget _buildSegmentItem(BuildContext context, int index, bool isSelected, bool isUnifiedSummary) {
     final segment = widget.appState.segments[index];
+    
+    // 정밀한 시간 비교 (밀리초 단위)
+    final currentSec = (widget.appState.currentPosition.inMilliseconds / 1000.0);
     final isPlaying = widget.appState.isPlaying && 
-                     widget.appState.currentPosition.inSeconds >= segment.startSec &&
-                     widget.appState.currentPosition.inSeconds <= segment.endSec;
+                     currentSec >= segment.startSec &&
+                     currentSec < segment.endSec;  // <= 대신 < 사용 (경계 중복 방지)
     
     return GestureDetector(
       key: widget.appState.segmentKeys[index],
@@ -331,13 +335,10 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
               // 세그먼트 텍스트 (편집 가능)
               _editingIndex == index 
                   ? _buildEditingTextField(index)
-                  : Text(
-                      segment.text,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: isPlaying || isSelected ? CursorTheme.textPrimary : CursorTheme.textSecondary,
-                        height: 1.4,
-                      ),
-                      softWrap: true,
+                  : _buildSegmentWordWrap(
+                      context,
+                      segment,
+                      isActive: isPlaying || isSelected,
                     ),
             ],
           ),
@@ -392,6 +393,126 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     }
   }
 
+  Widget _buildSegmentWordWrap(BuildContext context, WhisperSegment segment, {required bool isActive}) {
+    final words = segment.words;
+    final silences = segment.silences;
+    
+    if (words.isEmpty) {
+      return Text(
+        segment.text,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: isActive ? CursorTheme.textPrimary : CursorTheme.textSecondary,
+              height: 1.4,
+            ),
+        softWrap: true,
+      );
+    }
+
+    final currentPosition = widget.appState.videoController?.value.position;
+    final currentSec = (currentPosition?.inMilliseconds ?? 0) / 1000.0;
+
+    // 단어와 무음을 시간 순서대로 정렬하여 표시
+    final List<Widget> widgets = [];
+    
+    // 세그먼트 시작부터 첫 단어 전까지의 무음 추가
+    if (words.isNotEmpty) {
+      final firstWordStart = words.first.startSec;
+      for (final silence in silences) {
+        if (silence.endSec <= firstWordStart) {
+          widgets.add(_buildSilenceChip(context, silence, isActive));
+        }
+      }
+    }
+    
+    for (int i = 0; i < words.length; i++) {
+      final word = words[i];
+      
+      // 단어 칩 추가
+      widgets.add(_buildWordChip(
+        context,
+        word,
+        isHighlighted: currentSec >= word.startSec && currentSec < word.endSec,
+      ));
+      
+      // 단어 뒤의 무음 확인
+      final wordEndTime = word.endSec;
+      final nextWordStartTime = (i < words.length - 1) ? words[i + 1].startSec : segment.endSec;
+      
+      // 이 구간에 포함되거나 겹치는 모든 무음 찾기
+      for (final silence in silences) {
+        // 무음이 이 단어 뒤 ~ 다음 단어(또는 세그먼트 끝) 사이에 있는지 확인
+        final silenceInRange = 
+          (silence.startSec >= wordEndTime && silence.startSec < nextWordStartTime) ||
+          (silence.endSec > wordEndTime && silence.endSec <= nextWordStartTime) ||
+          (silence.startSec < wordEndTime && silence.endSec > wordEndTime);
+        
+        if (silenceInRange) {
+          widgets.add(_buildSilenceChip(context, silence, isActive));
+        }
+      }
+    }
+
+    return Wrap(
+      spacing: 2,
+      runSpacing: CursorTheme.spacingXS,
+      children: widgets,
+    );
+  }
+
+  Widget _buildWordChip(BuildContext context, WordSegment word, {required bool isHighlighted}) {
+    final background = isHighlighted
+        ? CursorTheme.cursorBlue.withOpacity(0.2)
+        : CursorTheme.backgroundSecondary;
+    final borderColor = isHighlighted ? CursorTheme.cursorBlue : CursorTheme.borderSecondary;
+
+    return Tooltip(
+      message: '${_formatTimeFromSeconds(word.startSec)} ~ ${_formatTimeFromSeconds(word.endSec)}',
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: CursorTheme.spacingXS,
+          vertical: 4,
+        ),
+        decoration: CursorTheme.containerDecoration(
+          backgroundColor: background,
+          borderColor: borderColor,
+          borderRadius: CursorTheme.radiusSmall,
+        ),
+        child: Text(
+          word.word,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: isHighlighted ? CursorTheme.cursorBlue : CursorTheme.textPrimary,
+                fontWeight: isHighlighted ? FontWeight.w600 : FontWeight.w500,
+              ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSilenceChip(BuildContext context, SilenceSegment silence, bool isActive) {
+    return Tooltip(
+      message: '무음 ${silence.duration.toStringAsFixed(2)}초',
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: CursorTheme.spacingXS,
+          vertical: 4,
+        ),
+        decoration: CursorTheme.containerDecoration(
+          backgroundColor: CursorTheme.warning.withOpacity(0.1),
+          borderColor: CursorTheme.warning.withOpacity(0.3),
+          borderRadius: CursorTheme.radiusSmall,
+        ),
+        child: Text(
+          '‖', // 무음 구간 표시 심볼
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: CursorTheme.warning,
+                fontWeight: FontWeight.bold,
+              ),
+        ),
+      ),
+    );
+  }
+
+
   // 요약 세그먼트 토글
   void _toggleSummarySegment(int index) {
     setState(() {
@@ -412,10 +533,14 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
   // 실시간 하이라이트 및 자동 스크롤
   void _scrollToPlayingSegment() {
     if (widget.appState.isPlaying) {
-      final currentTime = widget.appState.currentPosition.inSeconds;
+      // 정밀한 시간 비교 (밀리초 단위)
+      final currentTime = widget.appState.currentPosition.inMilliseconds / 1000.0;
+      
       for (int i = 0; i < widget.appState.segments.length; i++) {
         final segment = widget.appState.segments[i];
-        if (currentTime >= segment.startSec && currentTime <= segment.endSec) {
+        
+        // >= start && < end 사용 (경계 중복 방지)
+        if (currentTime >= segment.startSec && currentTime < segment.endSec) {
           // 현재 재생 중인 세그먼트 인덱스 업데이트
           if (widget.appState.currentSegmentIndex != i) {
             widget.appState.currentSegmentIndex = i;
@@ -513,16 +638,18 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     );
   }
   
-  // 시간 포맷팅 헬퍼 메서드
+  // 시간 포맷팅 헬퍼 메서드 (0.01초 단위까지 표시)
   String _formatTimeFromSeconds(double seconds) {
     final hours = (seconds / 3600).floor();
     final minutes = ((seconds % 3600) / 60).floor();
-    final secs = (seconds % 60).floor();
+    final remainingSeconds = seconds % 60;
+    final secs = remainingSeconds.floor();
+    final centiseconds = ((remainingSeconds - secs) * 100).round();
     
     if (hours > 0) {
-      return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
+      return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}.${centiseconds.toString().padLeft(2, '0')}';
     } else {
-      return '${minutes.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
+      return '${minutes.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}.${centiseconds.toString().padLeft(2, '0')}';
     }
   }
 }

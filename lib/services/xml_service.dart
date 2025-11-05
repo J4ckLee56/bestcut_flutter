@@ -17,11 +17,13 @@ class XMLService {
     try {
       if (kDebugMode) print('🎬 XMLService: 프리미어 프로 XML 생성 시작');
       
-      final segments = isSummary 
+      final rawSegments = isSummary 
           ? _appState.segments.where((s) => selectedSegmentIds.contains(s.id)).toList()
-          : _appState.segments;
+          : List<WhisperSegment>.from(_appState.segments);
+
+      final preparedSegments = _prepareSegmentsForExport(rawSegments, isSummary: isSummary);
       
-      final xml = _buildPremiereXML(segments, isSummary);
+      final xml = _buildPremiereXML(preparedSegments, isSummary);
       
       if (kDebugMode) print('✅ XMLService: 프리미어 프로 XML 생성 완료');
       return xml;
@@ -39,11 +41,13 @@ class XMLService {
     try {
       if (kDebugMode) print('🎬 XMLService: Final Cut Pro XML 생성 시작');
       
-      final segments = isSummary 
+      final rawSegments = isSummary 
           ? _appState.segments.where((s) => selectedSegmentIds.contains(s.id)).toList()
-          : _appState.segments;
+          : List<WhisperSegment>.from(_appState.segments);
+
+      final preparedSegments = _prepareSegmentsForExport(rawSegments, isSummary: isSummary);
       
-      final xml = _buildFCPXML(segments, isSummary);
+      final xml = _buildFCPXML(preparedSegments, isSummary);
       
       if (kDebugMode) print('✅ XMLService: Final Cut Pro XML 생성 완료');
       return xml;
@@ -61,13 +65,15 @@ class XMLService {
     try {
       if (kDebugMode) print('🎬 XMLService: DaVinci Resolve XML 생성 시작');
       
-      final segments = isSummary 
+      final rawSegments = isSummary 
           ? _appState.segments.where((s) => selectedSegmentIds.contains(s.id)).toList()
-          : _appState.segments;
+          : List<WhisperSegment>.from(_appState.segments);
+
+      final preparedSegments = _prepareSegmentsForExport(rawSegments, isSummary: isSummary);
+
+      if (kDebugMode) print('🔍 DaVinci XML: isSummary=$isSummary, selectedSegmentIds=$selectedSegmentIds, filteredSegments=${preparedSegments.length}');
       
-      if (kDebugMode) print('🔍 DaVinci XML: isSummary=$isSummary, selectedSegmentIds=$selectedSegmentIds, filteredSegments=${segments.length}');
-      
-      final xml = _buildDaVinciXML(segments, isSummary);
+      final xml = _buildDaVinciXML(preparedSegments, isSummary);
       
       if (kDebugMode) print('✅ XMLService: DaVinci Resolve XML 생성 완료');
       return xml;
@@ -1098,5 +1104,99 @@ class XMLService {
     buffer.writeln('</fcpxml>');
     
     return buffer.toString();
+  }
+
+  List<WhisperSegment> _prepareSegmentsForExport(List<WhisperSegment> segments, {required bool isSummary}) {
+    final normalized = segments
+        .map(_normalizeSegment)
+        .where((segment) => segment.endSec > segment.startSec)
+        .toList();
+
+    normalized.sort((a, b) => a.startSec.compareTo(b.startSec));
+
+    if (!isSummary) {
+      return normalized;
+    }
+
+    // Summary exports keep original source in/out but ensure deterministic order
+    return normalized;
+  }
+
+  WhisperSegment _normalizeSegment(WhisperSegment segment) {
+    final filteredWords = segment.words
+        .where((w) => w.word.trim().isNotEmpty)
+        .toList();
+
+    double start = segment.startSec;
+    double end = segment.endSec;
+    List<WordSegment> words = filteredWords;
+
+    if (filteredWords.isNotEmpty) {
+      start = filteredWords.first.startSec;
+      end = filteredWords.last.endSec;
+      words = filteredWords
+          .map((w) => WordSegment(
+                index: w.index,
+                word: w.word.trim(),
+                startSec: w.startSec,
+                endSec: w.endSec,
+                score: w.score,
+              ))
+          .toList();
+    }
+
+    final reconstructedText = words.isNotEmpty
+        ? _reconstructTextFromWords(words)
+        : _normalizeWhitespace(segment.text);
+
+    return segment.copyWith(
+      startSec: start,
+      endSec: end,
+      text: reconstructedText,
+      words: words,
+    );
+  }
+
+  String _reconstructTextFromWords(List<WordSegment> words) {
+    final buffer = StringBuffer();
+
+    for (var i = 0; i < words.length; i++) {
+      final token = words[i].word;
+      if (token.isEmpty) continue;
+
+      if (buffer.isEmpty) {
+        buffer.write(token);
+        continue;
+      }
+
+      if (_shouldAttachWithoutSpace(token)) {
+        buffer.write(token);
+      } else if (_isSuffixPunctuation(token)) {
+        buffer.write(token);
+      } else {
+        buffer.write(' ');
+        buffer.write(token);
+      }
+    }
+
+    return _normalizeWhitespace(buffer.toString())
+        .replaceAll(' ,', ',')
+        .replaceAll(' .', '.')
+        .trim();
+  }
+
+  bool _shouldAttachWithoutSpace(String token) {
+    const prefixes = ['%', "'", '"', ')', '}', ']', '…'];
+    return prefixes.contains(token);
+  }
+
+  bool _isSuffixPunctuation(String token) {
+    if (token.length > 2) return false;
+    const suffixes = ['.', ',', '!', '?', ')', ']', '}', ':', ';', '…'];
+    return suffixes.contains(token);
+  }
+
+  String _normalizeWhitespace(String text) {
+    return text.replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 }

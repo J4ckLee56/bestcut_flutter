@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/app_state.dart';
 import '../models/theme_group.dart';
+import '../models/whisper_segment.dart';
 import 'video_player_widget.dart';
 import 'segment_table_widget.dart';
 import 'action_buttons_widget.dart';
@@ -215,6 +216,14 @@ class _MainContentWidgetState extends State<MainContentWidget> {
         ],
       ),
     );
+  }
+
+  WhisperSegment? get _currentSegment {
+    final index = widget.appState.currentSegmentIndex;
+    if (index == null || index < 0 || index >= widget.appState.segments.length) {
+      return null;
+    }
+    return widget.appState.segments[index];
   }
 
   // 드래그 가능한 구분선 위젯
