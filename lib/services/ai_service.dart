@@ -2426,11 +2426,12 @@ ${jsonEncode(formatted)}
           : double.infinity;
 
       // 이 세그먼트 범위 내 + 다음 세그먼트 전까지의 무음 찾기
+      // 핵심: 무음 끝이 다음 세그먼트 시작 이전이면 현재 세그먼트에 포함
       final segmentSilences = regions
           .where((r) => 
               r.type == _RegionType.silence &&
               r.startSec >= segStart && // 이 세그먼트 시작 이후
-              r.startSec < nextSegStart) // 다음 세그먼트 시작 전
+              r.endSec <= nextSegStart) // 무음 끝이 다음 세그먼트 시작 이전
           .map((r) => r.silenceData!)
           .toList();
 
