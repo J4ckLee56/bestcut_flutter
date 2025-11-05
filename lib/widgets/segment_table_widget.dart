@@ -181,10 +181,26 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
                     trackVisibility: false,
                     thickness: 6,
                     radius: const Radius.circular(CursorTheme.radiusSmall),
-                    child: ListView.builder(
+                    child: ListView.separated(
                       controller: widget.appState.segmentScrollController,
                       padding: const EdgeInsets.all(CursorTheme.spacingS),
                       itemCount: displaySegmentIndices.length,
+                      separatorBuilder: (context, listIndex) {
+                        // 세그먼트 사이의 간격 표시
+                        if (listIndex < displaySegmentIndices.length - 1) {
+                          final currentIdx = displaySegmentIndices[listIndex];
+                          final nextIdx = displaySegmentIndices[listIndex + 1];
+                          final currentSegment = widget.appState.segments[currentIdx];
+                          final nextSegment = widget.appState.segments[nextIdx];
+                          final gap = nextSegment.startSec - currentSegment.endSec;
+                          
+                          // 0.3초 이상 간격이 있으면 무음 표시
+                          if (gap >= 0.3) {
+                            return _buildSegmentGap(context, gap);
+                          }
+                        }
+                        return const SizedBox.shrink();
+                      },
                       itemBuilder: (context, listIndex) {
                         final i = displaySegmentIndices[listIndex];
                         
@@ -414,18 +430,28 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     // 단어와 무음을 시간 순서대로 정렬하여 표시
     final List<Widget> widgets = [];
     
-    // 세그먼트 시작부터 첫 단어 전까지의 무음 추가
-    if (words.isNotEmpty) {
-      final firstWordStart = words.first.startSec;
-      for (final silence in silences) {
-        if (silence.endSec <= firstWordStart) {
-          widgets.add(_buildSilenceChip(context, silence, isActive));
-        }
-      }
-    }
+    // 방식 2: 단어와 무음을 시간순으로 배치
+    // 세그먼트에 포함된 무음들을 시간순으로 정렬
+    final sortedSilences = List<SilenceSegment>.from(silences)
+      ..sort((a, b) => a.startSec.compareTo(b.startSec));
+    
+    int silenceIndex = 0;
     
     for (int i = 0; i < words.length; i++) {
       final word = words[i];
+      
+      // 현재 단어 앞에 있는 모든 무음 추가
+      while (silenceIndex < sortedSilences.length) {
+        final silence = sortedSilences[silenceIndex];
+        
+        // 무음이 현재 단어보다 앞에 있으면 추가
+        if (silence.endSec <= word.startSec) {
+          widgets.add(_buildSilenceChip(context, silence));
+          silenceIndex++;
+        } else {
+          break;
+        }
+      }
       
       // 단어 칩 추가
       widgets.add(_buildWordChip(
@@ -434,22 +460,30 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
         isHighlighted: currentSec >= word.startSec && currentSec < word.endSec,
       ));
       
-      // 단어 뒤의 무음 확인
-      final wordEndTime = word.endSec;
-      final nextWordStartTime = (i < words.length - 1) ? words[i + 1].startSec : segment.endSec;
-      
-      // 이 구간에 포함되거나 겹치는 모든 무음 찾기
-      for (final silence in silences) {
-        // 무음이 이 단어 뒤 ~ 다음 단어(또는 세그먼트 끝) 사이에 있는지 확인
-        final silenceInRange = 
-          (silence.startSec >= wordEndTime && silence.startSec < nextWordStartTime) ||
-          (silence.endSec > wordEndTime && silence.endSec <= nextWordStartTime) ||
-          (silence.startSec < wordEndTime && silence.endSec > wordEndTime);
+      // 단어 중간이나 직후의 무음 추가
+      while (silenceIndex < sortedSilences.length) {
+        final silence = sortedSilences[silenceIndex];
         
-        if (silenceInRange) {
-          widgets.add(_buildSilenceChip(context, silence, isActive));
+        // 무음이 이 단어와 다음 단어 사이에 있으면 추가
+        final nextWordStart = (i < words.length - 1) ? words[i + 1].startSec : segment.endSec;
+        
+        if (silence.startSec >= word.endSec && silence.startSec < nextWordStart) {
+          widgets.add(_buildSilenceChip(context, silence));
+          silenceIndex++;
+        } else if (silence.startSec >= nextWordStart) {
+          // 다음 단어 영역이므로 나중에 처리
+          break;
+        } else {
+          // 현재 단어와 겹치는 무음 (이미 단어가 조정됨)
+          silenceIndex++;
         }
       }
+    }
+    
+    // 마지막 단어 이후의 남은 무음 추가
+    while (silenceIndex < sortedSilences.length) {
+      widgets.add(_buildSilenceChip(context, sortedSilences[silenceIndex]));
+      silenceIndex++;
     }
 
     return Wrap(
@@ -488,7 +522,8 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     );
   }
 
-  Widget _buildSilenceChip(BuildContext context, SilenceSegment silence, bool isActive) {
+  // 무음 칩 표시 (단어 사이)
+  Widget _buildSilenceChip(BuildContext context, SilenceSegment silence) {
     return Tooltip(
       message: '무음 ${silence.duration.toStringAsFixed(2)}초',
       child: Container(
@@ -502,12 +537,47 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
           borderRadius: CursorTheme.radiusSmall,
         ),
         child: Text(
-          '‖', // 무음 구간 표시 심볼
+          '[...]',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: CursorTheme.warning,
-                fontWeight: FontWeight.bold,
+                fontWeight: FontWeight.w600,
+                fontSize: 10,
               ),
         ),
+      ),
+    );
+  }
+
+  // 세그먼트 간 무음 구간 표시 (방식 2용 - 세그먼트 사이)
+  Widget _buildSegmentGap(BuildContext context, double gapSeconds) {
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: CursorTheme.spacingXS),
+      padding: const EdgeInsets.symmetric(
+        horizontal: CursorTheme.spacingS,
+        vertical: CursorTheme.spacingXS,
+      ),
+      decoration: CursorTheme.containerDecoration(
+        backgroundColor: CursorTheme.warning.withOpacity(0.08),
+        borderColor: CursorTheme.warning.withOpacity(0.3),
+        borderRadius: CursorTheme.radiusSmall,
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.graphic_eq,
+            size: 14,
+            color: CursorTheme.warning,
+          ),
+          const SizedBox(width: CursorTheme.spacingXS),
+          Text(
+            '무음 구간 ${gapSeconds.toStringAsFixed(2)}초',
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: CursorTheme.warning,
+                  fontWeight: FontWeight.w500,
+                ),
+          ),
+        ],
       ),
     );
   }
