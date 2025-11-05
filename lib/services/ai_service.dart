@@ -2415,15 +2415,24 @@ ${jsonEncode(formatted)}
         return aIndex.compareTo(bIndex);
       });
 
-      // 이 세그먼트의 시간 범위
+      // 이 세그먼트의 시간 범위 (조정된 시간 사용)
       final segStart = speechRegions.first.startSec;
       final segEnd = speechRegions.last.endSec;
 
-      // 다음 세그먼트의 시작 시간 찾기
+      // 다음 세그먼트의 시작 시간 찾기 (조정된 시간 사용)
       final nextSegmentIds = groupsByOriginalSegment.keys.where((id) => id > segId).toList()..sort();
-      final nextSegStart = nextSegmentIds.isNotEmpty 
-          ? groupsByOriginalSegment[nextSegmentIds.first]!.first.startSec
-          : double.infinity;
+      double nextSegStart = double.infinity;
+      
+      if (nextSegmentIds.isNotEmpty) {
+        final nextSpeechRegions = groupsByOriginalSegment[nextSegmentIds.first]!;
+        // 다음 세그먼트도 원래 단어 순서로 정렬
+        nextSpeechRegions.sort((a, b) {
+          final aIndex = a.wordData?.index ?? 0;
+          final bIndex = b.wordData?.index ?? 0;
+          return aIndex.compareTo(bIndex);
+        });
+        nextSegStart = nextSpeechRegions.first.startSec; // 조정된 시작 시간
+      }
 
       // 이 세그먼트 범위 내 + 다음 세그먼트 전까지의 무음 찾기
       // 핵심: 무음 끝이 다음 세그먼트 시작 이전이면 현재 세그먼트에 포함
@@ -2434,6 +2443,14 @@ ${jsonEncode(formatted)}
               r.endSec <= nextSegStart) // 무음 끝이 다음 세그먼트 시작 이전
           .map((r) => r.silenceData!)
           .toList();
+      
+      if (kDebugMode && segmentSilences.isNotEmpty) {
+        print('  세그먼트 $segId 무음 할당:');
+        for (final s in segmentSilences) {
+          print('    - 무음: ${s.startSec.toStringAsFixed(2)}s - ${s.endSec.toStringAsFixed(2)}s');
+        }
+        print('    - 세그먼트 끝: ${segEnd.toStringAsFixed(2)}s, 다음 세그먼트 시작: ${nextSegStart.toStringAsFixed(2)}s');
+      }
 
       // 단어 리스트 생성
       final words = <WordSegment>[];
