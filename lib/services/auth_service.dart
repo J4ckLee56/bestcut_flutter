@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
+import 'firebase_functions_service.dart';
 
 class AuthService {
   static final AuthService _instance = AuthService._internal();
@@ -9,6 +10,7 @@ class AuthService {
 
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseFunctionsService _functionsService = FirebaseFunctionsService();
 
   // 현재 사용자
   User? get currentUser => _auth.currentUser;
@@ -55,6 +57,9 @@ class AuthService {
       if (credential.user != null) {
         // 로그인 시간 업데이트
         await _updateLastLogin();
+        
+        // 로그인 로깅 (기존 로직에 영향 없음)
+        await _logLogin(email);
         
         if (kDebugMode) print('✅ AuthService: 로그인 성공: ${credential.user!.email}');
         return {
@@ -120,6 +125,9 @@ class AuthService {
       if (credential.user != null) {
         // Firestore에 사용자 데이터 생성
         await _createUserDocument(credential.user!);
+        
+        // 로그인 로깅 (신규 사용자도 로그인으로 처리)
+        await _logLogin(email);
         
         if (kDebugMode) print('✅ AuthService: 회원가입 성공: ${credential.user!.email}');
         return {
@@ -289,6 +297,30 @@ class AuthService {
     } catch (e) {
       if (kDebugMode) print('❌ AuthService: ID 토큰 가져오기 실패: $e');
       return null;
+    }
+  }
+
+  // 로그인 로깅 (Firebase Functions 호출)
+  Future<void> _logLogin(String email) async {
+    try {
+      if (kDebugMode) print('📝 AuthService: 로그인 로깅 시도: $email');
+      
+      final idToken = await getIdToken();
+      if (idToken == null) {
+        if (kDebugMode) print('⚠️ AuthService: ID 토큰 없음, 로그인 로깅 건너뜀');
+        return;
+      }
+      
+      final result = await _functionsService.logLogin(email: email, idToken: idToken);
+      
+      if (result['success']) {
+        if (kDebugMode) print('✅ AuthService: 로그인 로깅 성공');
+      } else {
+        if (kDebugMode) print('⚠️ AuthService: 로그인 로깅 실패: ${result['error']}');
+      }
+    } catch (e) {
+      if (kDebugMode) print('❌ AuthService: 로그인 로깅 오류: $e');
+      // 로깅 실패는 로그인 성공에 영향을 주지 않음
     }
   }
 }

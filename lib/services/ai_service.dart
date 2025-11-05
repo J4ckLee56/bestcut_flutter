@@ -11,6 +11,7 @@ import '../models/theme_group.dart';
 import 'auth_service.dart';
 import 'firestore_service.dart';
 import 'credit_service.dart';
+import 'firebase_functions_service.dart';
 
 // 취소 예외 클래스
 class CancellationException implements Exception {
@@ -31,11 +32,53 @@ class AIService {
   final AuthService _authService = AuthService();
   final FirestoreService _firestoreService = FirestoreService();
   final CreditService _creditService = CreditService();
+  final FirebaseFunctionsService _functionsService = FirebaseFunctionsService();
 
   AIService(this.appState, this.context);
 
   // CreditService getter
   CreditService get creditService => _creditService;
+
+  // 통합 액션 로깅 (Firebase Functions 호출)
+  Future<void> _logAction({
+    required String actionId,
+    required bool success,
+    int? creditCost,
+    int? remainingCredits,
+    int? processingTime,
+    Map<String, dynamic>? transcribeMeta,
+    Map<String, dynamic>? summarizeMeta,
+  }) async {
+    try {
+      if (kDebugMode) print('📝 AIService: 통합 액션 로깅 시도: $actionId');
+      
+      final idToken = await _authService.getIdToken();
+      if (idToken == null) {
+        if (kDebugMode) print('⚠️ AIService: ID 토큰 없음, 액션 로깅 건너뜀');
+        return;
+      }
+      
+      final result = await _functionsService.logAction(
+        actionId: actionId,
+        success: success,
+        idToken: idToken,
+        creditCost: creditCost,
+        remainingCredits: remainingCredits,
+        processingTime: processingTime,
+        transcribeMeta: transcribeMeta,
+        summarizeMeta: summarizeMeta,
+      );
+      
+      if (result['success']) {
+        if (kDebugMode) print('✅ AIService: 통합 액션 로깅 성공');
+      } else {
+        if (kDebugMode) print('⚠️ AIService: 통합 액션 로깅 실패: ${result['error']}');
+      }
+    } catch (e) {
+      if (kDebugMode) print('❌ AIService: 통합 액션 로깅 오류: $e');
+      // 로깅 실패는 AI 작업 성공에 영향을 주지 않음
+    }
+  }
 
   // HTTP 클라이언트 초기화
   http.Client _getHttpClient() {
@@ -125,10 +168,10 @@ class AIService {
   // AI 기반 고급 챕터 생성
   Future<void> generateAdvancedChapters() async {
     try {
-      print('🤖 AIService: AI 기반 고급 챕터 생성 시작');
+      if (kDebugMode) print('🤖 AIService: AI 기반 고급 챕터 생성 시작');
       
       if (appState.segments.isEmpty) {
-        print('❌ AIService: 세그먼트가 없습니다');
+        if (kDebugMode) print('❌ AIService: 세그먼트가 없습니다');
         _showErrorSnackBar('세그먼트가 없습니다. 먼저 음성인식을 진행해주세요.');
         return;
       }
@@ -141,7 +184,7 @@ class AIService {
       if (themeGroups.isNotEmpty) {
         // AppState에 고급 챕터 정보 업데이트
         appState.themeGroups = themeGroups;
-        print('✅ AIService: AI 기반 고급 챕터 생성 완료 - ${themeGroups.length}개 챕터');
+        if (kDebugMode) print('✅ AIService: AI 기반 고급 챕터 생성 완료 - ${themeGroups.length}개 챕터');
         
         _showSuccessSnackBar('AI가 생성한 고급 챕터 정보가 완성되었습니다. ${themeGroups.length}개 챕터를 생성했습니다.');
       } else {
@@ -149,7 +192,7 @@ class AIService {
       }
       
     } catch (e) {
-      print('❌ AIService: AI 챕터 생성 중 오류: $e');
+      if (kDebugMode) print('❌ AIService: AI 챕터 생성 중 오류: $e');
       _showErrorSnackBar('AI 챕터 생성 중 오류가 발생했습니다: $e');
     } finally {
       
@@ -165,7 +208,7 @@ class AIService {
     
     // 이미 취소된 상태라면 작업 시작하지 않음
     if (_isCancelled || appState.isOperationCancelled) {
-      print('✅ AIService: 이미 취소된 상태 - 음성인식 작업 시작 안함');
+      if (kDebugMode) print('✅ AIService: 이미 취소된 상태 - 음성인식 작업 시작 안함');
       return;
     }
     
@@ -307,7 +350,7 @@ class AIService {
       
     } catch (e) {
       if (e is CancellationException) {
-        print('✅ AIService: 음성인식 작업이 취소됨');
+        if (kDebugMode) print('✅ AIService: 음성인식 작업이 취소됨');
         appState.isRecognizing = false;
         return; // 취소된 경우 조용히 종료
       }
@@ -329,7 +372,7 @@ class AIService {
     
     // 이미 요약이 진행 중이면 중복 실행 방지
     if (appState.isSummarizing) {
-      print('✅ AIService: 이미 요약이 진행 중 - 중복 실행 방지');
+      if (kDebugMode) print('✅ AIService: 이미 요약이 진행 중 - 중복 실행 방지');
       return;
     }
     
@@ -338,7 +381,7 @@ class AIService {
     
     // 이미 취소된 상태라면 작업 시작하지 않음
     if (_isCancelled || appState.isOperationCancelled) {
-      print('✅ AIService: 이미 취소된 상태 - 요약 작업 시작 안함');
+      if (kDebugMode) print('✅ AIService: 이미 취소된 상태 - 요약 작업 시작 안함');
       return;
     }
     
@@ -365,18 +408,18 @@ class AIService {
       print('=== STEP 1: 청크별 개요 파악 시작 ===');
       
       // 취소 상태 직접 확인
-      if (_isCancelled || appState.isOperationCancelled) {
-        print('✅ AIService: STEP 1에서 작업 취소됨');
-        appState.isSummarizing = false;
+        if (_isCancelled || appState.isOperationCancelled) {
+          if (kDebugMode) print('✅ AIService: STEP 1에서 작업 취소됨');
+          appState.isSummarizing = false;
         return;
       }
       
       List<Map<String, dynamic>> chunkOverviews = [];
       for (int i = 0; i < chunks.length; i++) {
         // 취소 상태 직접 확인
-        if (_isCancelled || appState.isOperationCancelled) {
-          print('✅ AIService: STEP 1 루프에서 작업 취소됨');
-          appState.isSummarizing = false;
+          if (_isCancelled || appState.isOperationCancelled) {
+            if (kDebugMode) print('✅ AIService: STEP 1 루프에서 작업 취소됨');
+            appState.isSummarizing = false;
           return;
         }
         
@@ -390,7 +433,7 @@ class AIService {
       
       // 취소 상태 직접 확인
       if (_isCancelled || appState.isOperationCancelled) {
-        print('✅ AIService: STEP 2에서 작업 취소됨');
+        if (kDebugMode) print('✅ AIService: STEP 2에서 작업 취소됨');
         appState.isSummarizing = false;
         return;
       }
@@ -404,7 +447,7 @@ class AIService {
       
       // 취소 상태 직접 확인
       if (_isCancelled || appState.isOperationCancelled) {
-        print('✅ AIService: STEP 3에서 작업 취소됨');
+        if (kDebugMode) print('✅ AIService: STEP 3에서 작업 취소됨');
         appState.isSummarizing = false;
         return;
       }
@@ -422,7 +465,7 @@ class AIService {
       
       // 취소 상태 직접 확인
       if (_isCancelled || appState.isOperationCancelled) {
-        print('✅ AIService: STEP 4에서 작업 취소됨');
+        if (kDebugMode) print('✅ AIService: STEP 4에서 작업 취소됨');
         appState.isSummarizing = false;
         return;
       }
@@ -430,9 +473,9 @@ class AIService {
       List<int> allSelectedIds = [];
       for (int i = 0; i < themeGroups.length; i++) {
         // 취소 상태 직접 확인
-        if (_isCancelled || appState.isOperationCancelled) {
-          print('✅ AIService: STEP 4 루프에서 작업 취소됨');
-          appState.isSummarizing = false;
+          if (_isCancelled || appState.isOperationCancelled) {
+            if (kDebugMode) print('✅ AIService: STEP 4 루프에서 작업 취소됨');
+            appState.isSummarizing = false;
           return;
         }
         
@@ -448,7 +491,7 @@ class AIService {
       
       // 취소 상태 직접 확인
       if (_isCancelled || appState.isOperationCancelled) {
-        print('✅ AIService: STEP 5에서 작업 취소됨');
+        if (kDebugMode) print('✅ AIService: STEP 5에서 작업 취소됨');
         appState.isSummarizing = false;
         return;
       }
@@ -479,7 +522,7 @@ class AIService {
       
     } catch (e) {
       if (e is CancellationException) {
-        print('✅ AIService: 요약 작업이 취소됨');
+        if (kDebugMode) print('✅ AIService: 요약 작업이 취소됨');
         appState.isSummarizing = false;
         return; // 취소된 경우 조용히 종료
       }
@@ -691,7 +734,7 @@ class AIService {
   Future<Map<String, dynamic>> _getChunkOverview(List<WhisperSegment> chunkSegments, int chunkIndex, int totalChunks, String apiKey, Uri uri) async {
     // 취소 상태 직접 확인
     if (_isCancelled || appState.isOperationCancelled) {
-      print('✅ AIService: _getChunkOverview에서 작업 취소됨');
+      if (kDebugMode) print('✅ AIService: _getChunkOverview에서 작업 취소됨');
       throw CancellationException('작업이 취소되었습니다.');
     }
     
@@ -789,7 +832,7 @@ ${jsonEncode(formatted)}
   Future<String> _integrateChunkOverviews(List<Map<String, dynamic>> chunkOverviews, String apiKey, Uri uri) async {
     // 취소 상태 직접 확인
     if (_isCancelled || appState.isOperationCancelled) {
-      print('✅ AIService: _integrateChunkOverviews에서 작업 취소됨');
+      if (kDebugMode) print('✅ AIService: _integrateChunkOverviews에서 작업 취소됨');
       throw CancellationException('작업이 취소되었습니다.');
     }
     
@@ -876,7 +919,7 @@ ${chunkOverviews.map((overview) => '''
   Future<List<ThemeGroup>> _groupSegmentsByTheme(List<WhisperSegment> segments, String overallStructure) async {
     // 취소 상태 직접 확인
     if (_isCancelled || appState.isOperationCancelled) {
-      print('✅ AIService: _groupSegmentsByTheme에서 작업 취소됨');
+      if (kDebugMode) print('✅ AIService: _groupSegmentsByTheme에서 작업 취소됨');
       throw CancellationException('작업이 취소되었습니다.');
     }
     
@@ -1141,7 +1184,7 @@ ${chunkOverviews.map((overview) => '''
   // AI 기반 챕터 생성 핵심 로직
   Future<List<ThemeGroup>> _generateChaptersWithAI() async {
     try {
-      print('🤖 AIService: AI 챕터 생성 핵심 로직 시작');
+      if (kDebugMode) print('🤖 AIService: AI 챕터 생성 핵심 로직 시작');
       
       
       // 세그먼트 데이터 준비
@@ -1237,11 +1280,11 @@ ${jsonEncode(formatted)}
         );
       }).toList();
       
-      print('✅ AIService: AI 챕터 생성 완료 - ${themeGroups.length}개 챕터');
+      if (kDebugMode) print('✅ AIService: AI 챕터 생성 완료 - ${themeGroups.length}개 챕터');
       return themeGroups;
       
     } catch (e) {
-      print('❌ AIService: AI 챕터 생성 중 오류: $e');
+      if (kDebugMode) print('❌ AIService: AI 챕터 생성 중 오류: $e');
       return [];
     }
   }
@@ -1578,44 +1621,43 @@ ${jsonEncode(formatted)}
 
   // FFmpeg 경로 찾기
   String _findFfmpegPath() {
-    // 1. 앱 내장 FFmpeg 시도
+    // 1. 앱 번들의 Resources 폴더 (배포/빌드 버전)
     final appResourcesPath = _getAppResourcesPath();
     final appFfmpegPath = '$appResourcesPath/ffmpeg';
     
-    // Resources 폴더 내용 확인
-    print('🔍 Resources 폴더 내용 확인: $appResourcesPath');
-    try {
-      final dir = Directory(appResourcesPath);
-      if (dir.existsSync()) {
-        final files = dir.listSync();
-        print('📁 Resources 폴더 파일들:');
-        for (final file in files) {
-          print('   - ${file.path.split('/').last}');
-        }
-      }
-    } catch (e) {
-      print('❌ Resources 폴더 접근 오류: $e');
-    }
+    if (kDebugMode) print('🔍 앱 번들 Resources 경로: $appResourcesPath');
     
     if (File(appFfmpegPath).existsSync()) {
-      print('✅ 앱 내장 FFmpeg 발견: $appFfmpegPath');
+      if (kDebugMode) print('✅ 앱 번들 FFmpeg 발견: $appFfmpegPath');
       return appFfmpegPath;
     }
     
-    // 2. 시스템 FFmpeg 시도 (App Sandbox에서는 제한적)
-    final systemPaths = ['/usr/local/bin/ffmpeg', '/opt/homebrew/bin/ffmpeg'];
-    for (final path in systemPaths) {
-      if (File(path).existsSync()) {
-        print('✅ 시스템 FFmpeg 발견: $path');
-        // App Sandbox에서는 시스템 FFmpeg 사용이 제한될 수 있음
-        print('⚠️ App Sandbox 환경에서 시스템 FFmpeg 사용 시도');
-        return path;
+    // 2. 프로젝트 폴더의 FFmpeg (개발 중 - Hot Reload용)
+    final projectFfmpegPath = '/Users/ihuijae/Desktop/Flutter_Workspace/bestcut_flutter/ffmpeg/macos/ffmpeg';
+    if (File(projectFfmpegPath).existsSync()) {
+      if (kDebugMode) print('✅ 프로젝트 FFmpeg 발견 (개발 모드): $projectFfmpegPath');
+      return projectFfmpegPath;
+    }
+    
+    // Resources 폴더 내용 확인 (디버깅용)
+    if (kDebugMode) {
+      try {
+        final dir = Directory(appResourcesPath);
+        if (dir.existsSync()) {
+          final files = dir.listSync();
+          print('📁 Resources 폴더 파일들:');
+          for (final file in files) {
+            print('   - ${file.path.split('/').last}');
+          }
+        }
+      } catch (e) {
+        print('❌ Resources 폴더 접근 오류: $e');
       }
     }
     
-    // 3. 기본값 (오류 발생 시 사용자에게 알림)
-    print('❌ FFmpeg를 찾을 수 없습니다. 시스템에 설치되어 있는지 확인하세요.');
-    return '/usr/local/bin/ffmpeg';
+    // 3. FFmpeg를 찾을 수 없음
+    if (kDebugMode) print('❌ FFmpeg를 찾을 수 없습니다.');
+    throw Exception('FFmpeg를 찾을 수 없습니다. 앱 번들에 FFmpeg가 포함되어 있는지 확인하세요.');
   }
   
   // 앱 Resources 경로 가져오기
@@ -1698,15 +1740,7 @@ ${jsonEncode(formatted)}
         'segmentCount': segments.length,
       };
 
-      // Firestore에 작업 기록 저장
-      await _firestoreService.saveAction(
-        type: 'transcribe',
-        success: true,
-        processingTime: DateTime.now().millisecondsSinceEpoch, // 실제로는 작업 시작 시간부터 계산해야 함
-        creditCost: 0, // 음성인식은 크레딧 차감하지 않음
-        remainingCredits: remainingCredits,
-        transcribeMeta: transcribeMeta,
-      );
+      // 음성인식 단계에서는 개별 로깅하지 않음 (전체 완료 시에만 통합 로깅)
 
       if (kDebugMode) print('✅ AIService: 음성인식 데이터 저장 완료');
     } catch (e) {
@@ -1754,15 +1788,7 @@ ${jsonEncode(formatted)}
         'videoId': _generateVideoId(videoPath),
       };
 
-      // Firestore에 작업 기록 저장
-      await _firestoreService.saveAction(
-        type: 'summarize',
-        success: true,
-        processingTime: DateTime.now().millisecondsSinceEpoch, // 실제로는 작업 시작 시간부터 계산해야 함
-        creditCost: 0, // 요약도 크레딧 차감하지 않음
-        remainingCredits: remainingCredits,
-        summarizeMeta: summarizeMeta,
-      );
+      // 요약 단계에서는 개별 로깅하지 않음 (전체 완료 시에만 통합 로깅)
 
       if (kDebugMode) print('✅ AIService: 내용 요약 데이터 저장 완료');
     } catch (e) {
@@ -1800,23 +1826,26 @@ ${jsonEncode(formatted)}
         return;
       }
 
-      final response = await _getHttpClient().post(
-        Uri.parse('https://deductcredits-v4kacndtqq-uc.a.run.app'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $idToken',
-        },
-        body: jsonEncode({
-          'videoDuration': videoDuration,
-        }),
+      // 크레딧 차감 (비디오 길이 기반)
+      // 0초~29초: 1크레딧, 30초부터 60초 단위로 증가
+      int creditCost;
+      if (videoDuration <= 29) {
+        creditCost = 1; // 0초~29초
+      } else {
+        creditCost = ((videoDuration - 30) / 60).floor() + 1; // 30초부터 60초 단위
+      }
+      
+      final deductResult = await _functionsService.deductCredits(
+        creditCost,
+        idToken: idToken,
       );
 
-      if (response.statusCode != 200) {
-        if (kDebugMode) print('❌ AIService: 서버 크레딧 차감 실패: ${response.statusCode}');
+      if (!deductResult['success']) {
+        if (kDebugMode) print('❌ AIService: 서버 크레딧 차감 실패: ${deductResult['error']}');
         return;
       }
 
-      final responseData = jsonDecode(response.body) as Map<String, dynamic>;
+      final responseData = deductResult['data'] as Map<String, dynamic>;
       final remainingCredits = responseData['credits'] as int;
 
       // 전체 과정 완료 메타데이터 생성
@@ -1827,16 +1856,52 @@ ${jsonEncode(formatted)}
         'segmentCount': appState.segments.length,
         'selectedSegmentCount': appState.highlightedSegments.length,
         'processingType': 'transcribe_and_summarize',
+        'speechRate': appState.segments.length / videoDuration, // 초당 세그먼트 수
+        'modelSize': 'large-v3-turbo',
+        'totalProcessingTime': DateTime.now().millisecondsSinceEpoch,
       };
 
-      // Firestore에 작업 기록 저장
-      await _firestoreService.saveAction(
-        type: 'complete_processing',
+      // FirestoreService 로깅은 제거됨 - Firebase Functions에서 통합 로깅 처리
+
+      // Firebase Functions 통합 액션 로깅 추가 (음성인식 + 요약 완료)
+      final actionId = 'complete_${DateTime.now().millisecondsSinceEpoch}';
+      // creditCost는 위에서 계산된 값 사용
+      
+      final transcribeMetaData = {
+        'success': true,
+        'videoLength': videoDuration,
+        'duration': videoDuration,
+        'videoId': _generateVideoId(videoPath),
+        'segmentCount': appState.segments.length,
+        'speechRate': appState.segments.length / videoDuration,
+        'modelSize': 'large-v3-turbo',
+        'processingType': 'transcribe',
+      };
+      
+      final summarizeMetaData = {
+        'success': true,
+        'segmentCount': appState.segments.length,
+        'selectedSegmentCount': appState.highlightedSegments.length,
+        'processingType': 'summarize',
+        'totalProcessingTime': DateTime.now().millisecondsSinceEpoch,
+      };
+      
+      if (kDebugMode) {
+        print('🔍 AIService: 전송할 데이터 확인');
+        print('  - actionId: $actionId');
+        print('  - creditCost: $creditCost');
+        print('  - transcribeMeta: $transcribeMetaData');
+        print('  - summarizeMeta: $summarizeMetaData');
+      }
+      
+      await _logAction(
+        actionId: actionId,
         success: true,
-        processingTime: DateTime.now().millisecondsSinceEpoch,
-        creditCost: 0, // 서버에서 차감된 크레딧 (실제로는 서버 응답에서 가져와야 함)
+        creditCost: creditCost,
         remainingCredits: remainingCredits,
-        transcribeMeta: completeMeta,
+        processingTime: DateTime.now().millisecondsSinceEpoch,
+        transcribeMeta: transcribeMetaData,
+        summarizeMeta: summarizeMetaData,
       );
 
       if (kDebugMode) print('✅ AIService: 전체 과정 완료 - 크레딧 차감 완료');

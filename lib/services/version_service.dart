@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'firestore_service.dart';
+import 'firebase_functions_service.dart';
 import '../theme/cursor_theme.dart';
 
 class VersionService {
@@ -10,6 +11,7 @@ class VersionService {
   VersionService._internal();
 
   final FirestoreService _firestoreService = FirestoreService();
+  final FirebaseFunctionsService _functionsService = FirebaseFunctionsService();
 
   // 현재 앱 버전 정보
   String _currentVersion = '1.0.0';
@@ -35,6 +37,43 @@ class VersionService {
   // 서버와 버전 비교하여 업데이트 필요 여부 확인
   Future<Map<String, dynamic>> checkForUpdates() async {
     try {
+      // 1. Firebase Functions를 통한 업데이트 정보 조회 시도
+      if (kDebugMode) print('📱 VersionService: Firebase Functions로 업데이트 정보 조회 시도');
+      
+      final platform = defaultTargetPlatform == TargetPlatform.macOS ? 'mac' : 'win';
+      final functionsResult = await _functionsService.getUpdateInfo(platform: platform);
+      
+      if (functionsResult['success']) {
+        final data = functionsResult['data'] as Map<String, dynamic>;
+        final serverVersion = data['version'] as String?;
+        final downloadUrl = data['url'] as String?;
+        
+        if (serverVersion != null) {
+          // Firebase Functions에서 성공적으로 데이터를 가져온 경우
+          final hasUpdate = _isNewerVersion(serverVersion, _currentVersion);
+          
+          if (kDebugMode) {
+            print('📱 VersionService: Firebase Functions 버전 비교 결과');
+            print('   - 현재 버전: $_currentVersion');
+            print('   - 서버 버전: $serverVersion');
+            print('   - 업데이트 필요: $hasUpdate');
+          }
+
+          return {
+            'hasUpdate': hasUpdate,
+            'currentVersion': _currentVersion,
+            'serverVersion': serverVersion,
+            'downloadUrl': downloadUrl,
+            'message': hasUpdate 
+              ? '새로운 버전($serverVersion)이 사용 가능합니다.'
+              : '최신 버전을 사용 중입니다.',
+          };
+        }
+      }
+      
+      // 2. Firebase Functions 실패 시 기존 Firestore 방식으로 fallback
+      if (kDebugMode) print('⚠️ VersionService: Firebase Functions 실패, Firestore로 fallback');
+      
       final updateInfo = await _firestoreService.getUpdateInfo();
       
       if (updateInfo == null) {
@@ -74,7 +113,7 @@ class VersionService {
       final hasUpdate = _isNewerVersion(serverVersion, _currentVersion);
       
       if (kDebugMode) {
-        print('📱 VersionService: 버전 비교 결과');
+        print('📱 VersionService: Firestore 버전 비교 결과');
         print('   - 현재 버전: $_currentVersion');
         print('   - 서버 버전: $serverVersion');
         print('   - 업데이트 필요: $hasUpdate');
@@ -298,3 +337,4 @@ class VersionService {
     }
   }
 }
+

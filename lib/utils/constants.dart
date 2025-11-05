@@ -55,4 +55,22 @@ class AppDefaults {
   static const double mediumSpacing = 16.0;
   static const double largeSpacing = 24.0;
   static const double extraLargeSpacing = 32.0;
+}
+
+/// Firebase Functions URL 상수들
+class FirebaseFunctionsUrls {
+  // 로그인 관련
+  static const String logLogin = 'https://loglogin-v4kacndtqq-uc.a.run.app';
+  static const String checkEmailVerified = 'https://checkemailverified-v4kacndtqq-uc.a.run.app';
+  
+  // 업데이트 관련
+  static const String getUpdateInfo = 'https://getupdateinfo-v4kacndtqq-uc.a.run.app';
+  
+  // 크레딧 관련
+  static const String getCredits = 'https://getcredits-v4kacndtqq-uc.a.run.app';
+  static const String deductCredits = 'https://deductcredits-v4kacndtqq-uc.a.run.app';
+  static const String checkCredits = 'https://checkcredits-v4kacndtqq-uc.a.run.app';
+  
+  // 액션 로깅 관련
+  static const String logAction = 'https://logaction-v4kacndtqq-uc.a.run.app';
 } 

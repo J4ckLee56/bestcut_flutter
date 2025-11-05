@@ -87,6 +87,11 @@ class _ProcessingScreenWidgetState extends State<ProcessingScreenWidget> {
       
       if (!mounted) return; // 위젯이 마운트되지 않은 경우 리턴
       
+      // 음성인식 결과 확인
+      if (widget.appState.segments.isEmpty) {
+        throw Exception('음성인식에 실패했습니다. 세그먼트가 생성되지 않았습니다.');
+      }
+      
       setState(() {
         _currentOperation = '음성인식이 완료되었습니다!';
         _progress = 0.5;

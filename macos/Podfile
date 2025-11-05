@@ -39,4 +39,21 @@ post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_macos_build_settings(target)
   end
+  
+  # FFmpeg 복사 스크립트를 Build Phase에 추가
+  runner_project = installer.aggregate_targets[0].user_project
+  runner_target = runner_project.targets.find { |target| target.name == 'Runner' }
+  
+  unless runner_target.shell_script_build_phases.any? { |phase| phase.name == 'Copy FFmpeg' }
+    copy_ffmpeg_phase = runner_target.new_shell_script_build_phase('Copy FFmpeg')
+    copy_ffmpeg_phase.shell_script = "\"${SRCROOT}/scripts/copy_ffmpeg.sh\""
+    copy_ffmpeg_phase.show_env_vars_in_log = '0'
+    
+    # Build Phase 순서 조정 (Compile Sources 이후, Copy Bundle Resources 이전)
+    runner_target.build_phases.move(copy_ffmpeg_phase, runner_target.build_phases.count - 1)
+    
+    puts "✅ FFmpeg 복사 스크립트가 Build Phase에 추가되었습니다"
+  end
+  
+  runner_project.save
 end

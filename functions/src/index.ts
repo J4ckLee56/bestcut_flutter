@@ -274,7 +274,7 @@ export const integrateChunkOverviews = onCall(async (request) => {
             role: "user",
             content: `다음은 비디오의 청크별 개요들입니다:
 
-${chunkOverviews.map((overview: any, index: number) =>
+${chunkOverviews.map((overview: ChunkOverviewResponse, index: number) =>
     `청크 ${index + 1}: ${overview.main_topic}\n핵심 포인트: ${
       overview.key_points.join(", ")
     }`
@@ -365,7 +365,12 @@ export const generateFinalSummary = onCall(async (request) => {
             content: `전체 구조: ${JSON.stringify(overallStructure)}
 
 선택된 세그먼트들:
-${selectedSegments.map((seg: any) =>
+${selectedSegments.map((seg: {
+    id: number;
+    startSec: number;
+    endSec: number;
+    text: string;
+  }) =>
     `[${seg.id}] ${seg.startSec}s-${seg.endSec}s: ${seg.text}`
   ).join("\n")}
 
@@ -593,6 +598,287 @@ export const checkCredits = onRequest(async (req, res) => {
     res.json(response);
   } catch (error) {
     logger.error("checkCredits 오류", {error: (error as Error).message});
+    res.status(500).json({error: (error as Error).message});
+  }
+});
+
+/**
+ * logLogin Function - 로그인 로깅 및 신규 사용자 초기화
+ */
+export const logLogin = onRequest(async (req, res) => {
+  try {
+    // CORS 헤더 설정
+    res.set("Access-Control-Allow-Origin", "*");
+    res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+    if (req.method === "OPTIONS") {
+      res.status(204).send("");
+      return;
+    }
+
+    // POST 메서드만 허용
+    if (req.method !== "POST") {
+      res.status(405).json({error: "Method not allowed"});
+      return;
+    }
+
+    // Authorization 헤더 검증
+    const authHeader = req.get("Authorization") || "";
+    if (!authHeader.startsWith("Bearer ")) {
+      res.status(401).json({error: "Unauthorized"});
+      return;
+    }
+
+    const idToken = authHeader.split("Bearer ")[1];
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    const uid = decoded.uid;
+    const email = req.body.email || null;
+
+    // 사용자 문서 처리
+    const userRef = admin.firestore().collection("users").doc(uid);
+    const existing = await userRef.get();
+
+    if (!existing.exists) {
+      // 신규 사용자: 초기 데이터 설정
+      await userRef.set({
+        email,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        credits: 1000,
+        lastLogin: admin.firestore.FieldValue.serverTimestamp(),
+        available: true,
+      });
+      logger.info("신규 사용자 생성", {uid, email});
+    } else {
+      // 기존 사용자: 이메일 업데이트 및 로그인 시간 갱신
+      const updateData: Record<string, unknown> = {
+        lastLogin: admin.firestore.FieldValue.serverTimestamp(),
+      };
+
+      if (email) {
+        updateData.email = email;
+      }
+
+      await userRef.set(updateData, {merge: true});
+      logger.info("기존 사용자 로그인", {uid, email});
+    }
+
+    res.status(200).json({status: "success"});
+  } catch (error) {
+    logger.error("logLogin 오류", {error: (error as Error).message});
+    res.status(500).json({error: (error as Error).message});
+  }
+});
+
+/**
+ * checkEmailVerified Function - 이메일 인증 상태 확인
+ */
+export const checkEmailVerified = onRequest(async (req, res) => {
+  try {
+    // CORS 헤더 설정
+    res.set("Access-Control-Allow-Origin", "*");
+    res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+    if (req.method === "OPTIONS") {
+      res.status(204).send("");
+      return;
+    }
+
+    // GET 메서드만 허용
+    if (req.method !== "GET") {
+      res.status(405).json({error: "Method not allowed"});
+      return;
+    }
+
+    // Authorization 헤더 검증
+    const authHeader = req.get("Authorization") || "";
+    if (!authHeader.startsWith("Bearer ")) {
+      res.status(401).json({error: "Unauthorized"});
+      return;
+    }
+
+    const idToken = authHeader.split("Bearer ")[1];
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    const uid = decoded.uid;
+
+    // 사용자 이메일 인증 상태 확인
+    const userRecord = await admin.auth().getUser(uid);
+    const emailVerified = userRecord.emailVerified;
+
+    logger.info("이메일 인증 상태 확인", {uid, emailVerified});
+    res.status(200).json({email_verified: emailVerified});
+  } catch (error) {
+    logger.error("checkEmailVerified 오류", {error: (error as Error).message});
+    res.status(500).json({error: (error as Error).message});
+  }
+});
+
+/**
+ * getUpdateInfo Function - 플랫폼별 업데이트 정보 제공
+ */
+export const getUpdateInfo = onRequest(async (req, res) => {
+  try {
+    // CORS 헤더 설정
+    res.set("Access-Control-Allow-Origin", "*");
+    res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+    if (req.method === "OPTIONS") {
+      res.status(204).send("");
+      return;
+    }
+
+    // GET 메서드만 허용
+    if (req.method !== "GET") {
+      res.status(405).json({error: "Method not allowed"});
+      return;
+    }
+
+    // 플랫폼 파라미터 확인 (기본값: mac)
+    const platformParam = req.query.platform;
+    const platform = (typeof platformParam === "string" ?
+      platformParam : "mac").toLowerCase();
+    // Firestore에서 업데이트 정보 조회
+    const doc = await admin.firestore()
+      .collection("updates")
+      .doc("latest")
+      .get();
+
+    if (!doc.exists) {
+      logger.error("업데이트 정보를 찾을 수 없음");
+      res.status(404).json({error: "Update info not found"});
+      return;
+    }
+
+    const data = doc.data();
+    if (!data) {
+      logger.error("업데이트 데이터가 없음");
+      res.status(404).json({error: "Update data not found"});
+      return;
+    }
+
+    // 플랫폼별 필드 매핑
+    const versionKey = platform === "win" ? "version_win" : "version_mac";
+    const urlKey = platform === "win" ? "url_win" : "url_mac";
+    const patchUrlKey = platform === "win" ? "patch_url_win" : "patch_url_mac";
+    const patchFromKey = platform === "win" ?
+      "patch_from_win" : "patch_from_mac";
+
+    const response = {
+      version: data[versionKey] || null,
+      url: data[urlKey] || null,
+      patch_url: data[patchUrlKey] || null,
+      patch_from: data[patchFromKey] || null,
+    };
+
+    logger.info("업데이트 정보 조회 성공", {platform, ...response});
+    res.status(200).json(response);
+  } catch (error) {
+    logger.error("getUpdateInfo 오류", {error: (error as Error).message});
+    res.status(500).json({error: (error as Error).message});
+  }
+});
+
+/**
+ * logAction Function - 음성인식과 내용요약을 하나의 사이클로 통합하여 로깅
+ */
+export const logAction = onRequest(async (req, res) => {
+  try {
+    // CORS 헤더 설정
+    res.set("Access-Control-Allow-Origin", "*");
+    res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+    if (req.method === "OPTIONS") {
+      res.status(204).send("");
+      return;
+    }
+
+    // POST 메서드만 허용
+    if (req.method !== "POST") {
+      res.status(405).json({error: "Method not allowed"});
+      return;
+    }
+
+    // Authorization 헤더 검증
+    const authHeader = req.get("Authorization") || "";
+    if (!authHeader.startsWith("Bearer ")) {
+      res.status(401).json({error: "Unauthorized"});
+      return;
+    }
+
+    const idToken = authHeader.split("Bearer ")[1];
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    const uid = decoded.uid;
+
+    // 요청 본문에서 액션 데이터 검증
+    const action = req.body;
+    if (!action || !action.actionId || !action.type) {
+      res.status(400).json({error: "Missing required action fields"});
+      return;
+    }
+
+    // 디버깅을 위한 로그 추가 (개발 환경에서만)
+    if (process.env.NODE_ENV !== 'production') {
+      logger.info("logAction 요청 데이터", {
+        actionId: action.actionId,
+        type: action.type,
+        creditCost: action.creditCost,
+        transcribeMeta: action.transcribeMeta,
+        summarizeMeta: action.summarizeMeta,
+      });
+
+      // 요청 본문 전체 로그
+      logger.info("logAction 전체 요청 본문", JSON.stringify(action, null, 2));
+    }
+
+    // 액션 타입이 'transcribe-summarize'인지 확인
+    if (action.type !== "transcribe-summarize") {
+      res.status(400).json({
+        error: "Invalid action type. Expected 'transcribe-summarize'",
+      });
+      return;
+    }
+
+    // 통합된 액션 데이터 구성
+    const logDoc = {
+      actionId: action.actionId,
+      type: action.type,
+      userId: uid,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      success: typeof action.success === "boolean" ? action.success : true,
+      creditCost: action.creditCost || null,
+      remainingCredits: action.remainingCredits || null,
+      processingTime: action.processingTime || null,
+      // 음성인식과 요약 메타데이터를 하나의 문서에 저장
+      transcribeMeta: {
+        success: action.transcribeMeta?.success ?? true,
+        ...action.transcribeMeta,
+      },
+      summarizeMeta: {
+        success: action.summarizeMeta?.success ?? true,
+        ...action.summarizeMeta,
+      },
+    };
+
+    // Firestore에 액션 로그 저장
+    await admin.firestore()
+      .collection("actions")
+      .doc(action.actionId)
+      .set(logDoc);
+
+    logger.info("통합 액션 로그 저장 성공", {
+      actionId: action.actionId,
+      type: action.type,
+      userId: uid,
+      transcribeMeta: logDoc.transcribeMeta,
+      summarizeMeta: logDoc.summarizeMeta,
+    });
+
+    res.status(200).json({status: "logged"});
+  } catch (error) {
+    logger.error("logAction 오류", {error: (error as Error).message});
     res.status(500).json({error: (error as Error).message});
   }
 });
