@@ -2267,14 +2267,14 @@ ${jsonEncode(formatted)}
         final nextFirstWord = nextSegment.words.isNotEmpty ? nextSegment.words.first : null;
 
         if (nextFirstWord != null) {
-          // 세그먼트 간 무음 찾기 (겹침 허용)
+          // 세그먼트 간 무음 찾기
           for (final silence in allSilences) {
-            // 무음이 두 세그먼트 사이에 있는지 확인
-            // 조건: 무음의 일부가 현재 끝 단어 이후 && 다음 시작 단어와 겹치거나 이전
-            final silenceOverlapsGap = 
-                (silence.startSec < nextFirstWord.startSec && silence.endSec > currentLastWord.endSec);
+            // 무음이 현재 세그먼트 끝과 다음 세그먼트 시작 사이에 있는지 확인
+            // 조건 완화: 무음이 두 단어 범위와 겹치기만 하면 OK
+            final silenceAfterCurrent = silence.endSec > currentLastWord.endSec;
+            final silenceBeforeOrOverlapsNext = silence.startSec <= nextFirstWord.endSec;
             
-            if (silenceOverlapsGap) {
+            if (silenceAfterCurrent && silenceBeforeOrOverlapsNext) {
               // 현재 세그먼트 끝 단어 조정
               final adjustedEnd = silence.startSec < currentLastWord.endSec 
                   ? currentLastWord.endSec  // 무음이 단어와 겹치면 단어 유지
