@@ -2267,29 +2267,35 @@ ${jsonEncode(formatted)}
         final nextFirstWord = nextSegment.words.isNotEmpty ? nextSegment.words.first : null;
 
         if (nextFirstWord != null) {
-          // 두 단어 사이에 있는 무음들 찾기
+          // 세그먼트 간 무음 찾기 (겹침 허용)
           for (final silence in allSilences) {
-            // 무음이 현재 세그먼트 끝 단어 이후 ~ 다음 세그먼트 시작 단어 전에 있음
-            if (silence.startSec >= currentLastWord.endSec && 
-                silence.endSec <= nextFirstWord.startSec) {
-              
-              // 현재 세그먼트 끝 단어를 무음 시작으로 조정
+            // 무음이 두 세그먼트 사이에 있는지 확인
+            // 조건: 무음의 일부가 현재 끝 단어 이후 && 다음 시작 단어와 겹치거나 이전
+            final silenceOverlapsGap = 
+                (silence.startSec < nextFirstWord.startSec && silence.endSec > currentLastWord.endSec);
+            
+            if (silenceOverlapsGap) {
+              // 현재 세그먼트 끝 단어 조정
+              final adjustedEnd = silence.startSec < currentLastWord.endSec 
+                  ? currentLastWord.endSec  // 무음이 단어와 겹치면 단어 유지
+                  : silence.startSec;       // 무음이 단어 이후면 무음 시작으로
+                  
               words[words.length - 1] = WordSegment(
                 index: currentLastWord.index,
                 word: currentLastWord.word,
                 startSec: currentLastWord.startSec,
-                endSec: silence.startSec, // 무음 시작으로 끝 조정
+                endSec: adjustedEnd,
                 score: currentLastWord.score,
               );
 
-              // 다음 세그먼트 시작 단어는 다음 루프에서 조정됨
-              
               // 무음을 현재 세그먼트에 추가
-              segmentSilences.add(silence);
+              if (!segmentSilences.contains(silence)) {
+                segmentSilences.add(silence);
 
-              if (kDebugMode) {
-                print('세그먼트 ${segment.id} 끝 단어 "${currentLastWord.word}" 조정: ${currentLastWord.endSec.toStringAsFixed(2)}s → ${silence.startSec.toStringAsFixed(2)}s');
-                print('  → 무음 ${silence.startSec.toStringAsFixed(2)}s-${silence.endSec.toStringAsFixed(2)}s를 세그먼트 ${segment.id}에 추가');
+                if (kDebugMode) {
+                  print('세그먼트 ${segment.id} 끝 단어 "${currentLastWord.word}" 조정: ${currentLastWord.endSec.toStringAsFixed(2)}s → ${adjustedEnd.toStringAsFixed(2)}s');
+                  print('  → 무음 ${silence.startSec.toStringAsFixed(2)}s-${silence.endSec.toStringAsFixed(2)}s를 세그먼트 ${segment.id}에 추가');
+                }
               }
             }
           }
