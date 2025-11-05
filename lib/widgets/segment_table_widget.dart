@@ -181,26 +181,10 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
                     trackVisibility: false,
                     thickness: 6,
                     radius: const Radius.circular(CursorTheme.radiusSmall),
-                    child: ListView.separated(
+                    child: ListView.builder(
                       controller: widget.appState.segmentScrollController,
                       padding: const EdgeInsets.all(CursorTheme.spacingS),
                       itemCount: displaySegmentIndices.length,
-                      separatorBuilder: (context, listIndex) {
-                        // 세그먼트 사이의 간격 표시
-                        if (listIndex < displaySegmentIndices.length - 1) {
-                          final currentIdx = displaySegmentIndices[listIndex];
-                          final nextIdx = displaySegmentIndices[listIndex + 1];
-                          final currentSegment = widget.appState.segments[currentIdx];
-                          final nextSegment = widget.appState.segments[nextIdx];
-                          final gap = nextSegment.startSec - currentSegment.endSec;
-                          
-                          // 0.3초 이상 간격이 있으면 무음 표시
-                          if (gap >= 0.3) {
-                            return _buildSegmentGap(context, gap);
-                          }
-                        }
-                        return const SizedBox.shrink();
-                      },
                       itemBuilder: (context, listIndex) {
                         final i = displaySegmentIndices[listIndex];
                         
@@ -548,39 +532,6 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     );
   }
 
-  // 세그먼트 간 무음 구간 표시 (방식 2용 - 세그먼트 사이)
-  Widget _buildSegmentGap(BuildContext context, double gapSeconds) {
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: CursorTheme.spacingXS),
-      padding: const EdgeInsets.symmetric(
-        horizontal: CursorTheme.spacingS,
-        vertical: CursorTheme.spacingXS,
-      ),
-      decoration: CursorTheme.containerDecoration(
-        backgroundColor: CursorTheme.warning.withOpacity(0.08),
-        borderColor: CursorTheme.warning.withOpacity(0.3),
-        borderRadius: CursorTheme.radiusSmall,
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.graphic_eq,
-            size: 14,
-            color: CursorTheme.warning,
-          ),
-          const SizedBox(width: CursorTheme.spacingXS),
-          Text(
-            '무음 구간 ${gapSeconds.toStringAsFixed(2)}초',
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: CursorTheme.warning,
-                  fontWeight: FontWeight.w500,
-                ),
-          ),
-        ],
-      ),
-    );
-  }
 
 
   // 요약 세그먼트 토글

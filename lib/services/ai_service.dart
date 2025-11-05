@@ -2408,16 +2408,23 @@ ${jsonEncode(formatted)}
       final speechRegions = groupsByOriginalSegment[segId]!;
       if (speechRegions.isEmpty) continue;
 
+      // 원래 단어 순서대로 정렬 (wordData.index 기준)
+      speechRegions.sort((a, b) {
+        final aIndex = a.wordData?.index ?? 0;
+        final bIndex = b.wordData?.index ?? 0;
+        return aIndex.compareTo(bIndex);
+      });
+
       // 이 세그먼트의 시간 범위
       final segStart = speechRegions.first.startSec;
       final segEnd = speechRegions.last.endSec;
 
-      // 이 세그먼트 범위 내의 무음 찾기
+      // 이 세그먼트 범위 내 또는 바로 뒤의 무음 찾기
       final segmentSilences = regions
           .where((r) => 
               r.type == _RegionType.silence &&
-              r.startSec >= segStart &&
-              r.endSec <= segEnd)
+              ((r.startSec >= segStart && r.endSec <= segEnd) || // 세그먼트 내부
+               (r.startSec >= segEnd && r.startSec < segEnd + 5.0))) // 세그먼트 직후 5초 이내
           .map((r) => r.silenceData!)
           .toList();
 
