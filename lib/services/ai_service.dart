@@ -641,10 +641,15 @@ class AIService {
 
       print('whisper.cpp 성공: ${enrichedSegments.length}개 세그먼트 (단어 포함=${enrichedSegments.isNotEmpty && enrichedSegments.first.words.isNotEmpty})');
       
-      // 방식 2: 무음 기반 재분할 (세그먼트 구조 무시, 단어와 무음만 조정)
-      print('=== 무음 기반 단어 재분할 시작 ===');
-      final segmentsWithSilence = _integrateSilenceIntoSegments(enrichedSegments, silences);
-      print('무음 기반 재분할 완료');
+      // 1단계: 에너지 프로파일로 단어 경계 미세 조정
+      print('=== 에너지 기반 단어 경계 미세 조정 시작 ===');
+      final energyRefinedSegments = _refineWordBoundariesWithEnergy(enrichedSegments, energyProfile);
+      print('에너지 기반 단어 경계 조정 완료');
+      
+      // 2단계: 무음 기반 세그먼트 경계 조정
+      print('=== 무음 기반 세그먼트 경계 조정 시작 ===');
+      final segmentsWithSilence = _integrateSilenceIntoSegments(energyRefinedSegments, silences);
+      print('무음 기반 세그먼트 경계 조정 완료');
       
       return segmentsWithSilence;
       
@@ -2228,6 +2233,59 @@ ${jsonEncode(formatted)}
     }
 
     return approximateEnd; // 찾지 못하면 원래 값 유지
+  }
+
+  // 에너지 프로파일 기반 단어 경계 미세 조정
+  List<WhisperSegment> _refineWordBoundariesWithEnergy(
+    List<WhisperSegment> segments,
+    List<AudioEnergyFrame> energyProfile,
+  ) {
+    if (energyProfile.isEmpty) {
+      if (kDebugMode) print('⚠️ 에너지 프로파일이 비어있어 조정을 건너뜁니다.');
+      return segments;
+    }
+
+    final List<WhisperSegment> result = [];
+
+    for (final segment in segments) {
+      if (segment.words.isEmpty) {
+        result.add(segment);
+        continue;
+      }
+
+      final refinedWords = <WordSegment>[];
+      
+      for (final word in segment.words) {
+        // WhisperX가 제공한 대략적인 시간
+        final approximateStart = word.startSec;
+        final approximateEnd = word.endSec;
+
+        // 에너지 기반으로 실제 발화 시작/끝 찾기 (±0.3초 범위)
+        final actualStart = _findActualWordStart(approximateStart, energyProfile);
+        final actualEnd = _findActualWordEnd(approximateEnd, energyProfile);
+
+        refinedWords.add(WordSegment(
+          index: word.index,
+          word: word.word,
+          startSec: actualStart,
+          endSec: actualEnd,
+          score: word.score,
+        ));
+
+        if (kDebugMode && ((actualStart - approximateStart).abs() > 0.05 || (actualEnd - approximateEnd).abs() > 0.05)) {
+          print('  단어 "${word.word}": ${approximateStart.toStringAsFixed(2)}-${approximateEnd.toStringAsFixed(2)}s → ${actualStart.toStringAsFixed(2)}-${actualEnd.toStringAsFixed(2)}s');
+        }
+      }
+
+      // 조정된 단어들로 세그먼트 재구성
+      result.add(segment.copyWith(
+        words: refinedWords,
+        startSec: refinedWords.first.startSec,
+        endSec: refinedWords.last.endSec,
+      ));
+    }
+
+    return result;
   }
 
   // 무음 구간 기반 세그먼트 경계 조정 (방식 2)
