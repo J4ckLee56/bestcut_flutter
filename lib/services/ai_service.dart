@@ -641,14 +641,10 @@ class AIService {
 
       print('whisper.cpp 성공: ${enrichedSegments.length}개 세그먼트 (단어 포함=${enrichedSegments.isNotEmpty && enrichedSegments.first.words.isNotEmpty})');
       
-      // 에너지 프로파일 기반 단어 타임스탬프 정밀 조정
-      print('=== 단어 타임스탬프 정밀 조정 시작 ===');
-      final refinedSegments = _refineWordTimestamps(enrichedSegments, energyProfile);
-      print('타임스탬프 정밀 조정 완료');
-      
-      // 무음 구간 정보를 세그먼트에 통합
-      final segmentsWithSilence = _integrateSilenceIntoSegments(refinedSegments, silences);
-      print('무음 정보 통합 완료');
+      // 방식 2: 무음 기반 재분할 (세그먼트 구조 무시, 단어와 무음만 조정)
+      print('=== 무음 기반 단어 재분할 시작 ===');
+      final segmentsWithSilence = _integrateSilenceIntoSegments(enrichedSegments, silences);
+      print('무음 기반 재분할 완료');
       
       return segmentsWithSilence;
       
@@ -2298,9 +2294,16 @@ ${jsonEncode(formatted)}
     return result;
   }
 
-  // 무음에 맞춰 구간 조정
+  // 무음에 맞춰 단어 구간만 조정 (세그먼트 무시)
   List<_TimeRegion> _adjustRegionsToSilence(List<_TimeRegion> regions) {
     final List<_TimeRegion> adjusted = [];
+    
+    // 무음 구간만 추출
+    final silenceRegions = regions.where((r) => r.type == _RegionType.silence).toList();
+
+    if (kDebugMode) {
+      print('무음 구간: ${silenceRegions.length}개');
+    }
 
     for (int i = 0; i < regions.length; i++) {
       final region = regions[i];
@@ -2311,47 +2314,52 @@ ${jsonEncode(formatted)}
         continue;
       }
 
-      // 발화 구간인 경우 - 무음과 겹치는 부분 제거
+      // 단어 구간인 경우 - 무음과 겹치는 부분만 조정
       double adjustedStart = region.startSec;
       double adjustedEnd = region.endSec;
+      final originalStart = region.startSec;
+      final originalEnd = region.endSec;
 
-      // 이 구간과 겹치는 무음들 찾기
-      for (final otherRegion in regions) {
-        if (otherRegion.type != _RegionType.silence) continue;
+      // 모든 무음과 비교
+      for (final silence in silenceRegions) {
+        final silenceStart = silence.startSec;
+        final silenceEnd = silence.endSec;
 
-        final silenceStart = otherRegion.startSec;
-        final silenceEnd = otherRegion.endSec;
-
-        // 무음이 단어의 시작 부분과 겹침
-        if (silenceStart <= adjustedStart && silenceEnd > adjustedStart) {
-          adjustedStart = silenceEnd; // 단어 시작을 무음 끝으로 이동
-          if (kDebugMode) {
-            print('  단어 시작 조정: ${region.startSec.toStringAsFixed(2)}s → ${adjustedStart.toStringAsFixed(2)}s');
-          }
+        // 무음이 단어와 전혀 겹치지 않으면 건너뛰기
+        if (silenceEnd <= adjustedStart || silenceStart >= adjustedEnd) {
+          continue;
         }
 
-        // 무음이 단어의 끝 부분과 겹침
-        if (silenceStart < adjustedEnd && silenceEnd >= adjustedEnd) {
-          adjustedEnd = silenceStart; // 단어 끝을 무음 시작으로 이동
-          if (kDebugMode) {
-            print('  단어 끝 조정: ${region.endSec.toStringAsFixed(2)}s → ${adjustedEnd.toStringAsFixed(2)}s');
-          }
-        }
-
-        // 무음이 단어 전체를 덮음
+        // 케이스 1: 무음이 단어 전체를 덮음 → 단어 제거
         if (silenceStart <= adjustedStart && silenceEnd >= adjustedEnd) {
           if (kDebugMode) {
-            print('  ⚠️ 단어 완전히 제거: ${region.wordData?.word ?? "?"} (무음으로 덮임)');
+            print('  ⚠️ 단어 "${region.wordData?.word}" 완전 제거: 무음(${silenceStart.toStringAsFixed(2)}-${silenceEnd.toStringAsFixed(2)})이 단어(${originalStart.toStringAsFixed(2)}-${originalEnd.toStringAsFixed(2)}) 전체를 덮음');
           }
-          adjustedStart = adjustedEnd; // 단어를 0 길이로 만듦 (제거 표시)
+          adjustedStart = adjustedEnd; // 0 길이로 만들어 제거 표시
           break;
         }
 
-        // 무음이 단어 중간에 있음 - 단어를 쪼갬 (앞부분만 사용)
-        if (silenceStart > adjustedStart && silenceStart < adjustedEnd) {
-          adjustedEnd = silenceStart; // 단어를 무음 시작 지점에서 자름
+        // 케이스 2: 무음이 단어 시작 부분과 겹침 → 시작 조정
+        if (silenceStart <= adjustedStart && silenceEnd > adjustedStart && silenceEnd < adjustedEnd) {
+          adjustedStart = silenceEnd;
           if (kDebugMode) {
-            print('  단어 중간 절단: ${region.endSec.toStringAsFixed(2)}s → ${adjustedEnd.toStringAsFixed(2)}s');
+            print('  단어 "${region.wordData?.word}" 시작 조정: ${originalStart.toStringAsFixed(2)}s → ${adjustedStart.toStringAsFixed(2)}s');
+          }
+        }
+
+        // 케이스 3: 무음이 단어 끝 부분과 겹침 → 끝 조정
+        if (silenceStart > adjustedStart && silenceStart < adjustedEnd && silenceEnd >= adjustedEnd) {
+          adjustedEnd = silenceStart;
+          if (kDebugMode) {
+            print('  단어 "${region.wordData?.word}" 끝 조정: ${originalEnd.toStringAsFixed(2)}s → ${adjustedEnd.toStringAsFixed(2)}s');
+          }
+        }
+
+        // 케이스 4: 무음이 단어 중간에 있음 → 끝만 조정 (단어를 무음 앞에서 끝냄)
+        if (silenceStart > adjustedStart && silenceEnd < adjustedEnd) {
+          adjustedEnd = silenceStart;
+          if (kDebugMode) {
+            print('  단어 "${region.wordData?.word}" 중간 무음으로 끝 조정: ${originalEnd.toStringAsFixed(2)}s → ${adjustedEnd.toStringAsFixed(2)}s');
           }
         }
       }
@@ -2372,7 +2380,7 @@ ${jsonEncode(formatted)}
     return adjusted;
   }
 
-  // 구간을 세그먼트로 재구성 (무음 정보 포함)
+  // 구간을 세그먼트로 재구성 (원래 세그먼트 ID 유지)
   List<WhisperSegment> _reconstructSegmentsFromRegions(List<_TimeRegion> regions) {
     final List<WhisperSegment> segments = [];
     
@@ -2381,46 +2389,77 @@ ${jsonEncode(formatted)}
       return segments;
     }
 
-    // 연속된 구간(발화+무음)을 세그먼트로 그룹화
-    List<_TimeRegion> currentGroup = [];
-    int segmentId = 1;
+    // 원래 세그먼트 ID별로 그룹화
+    final Map<int, List<_TimeRegion>> groupsByOriginalSegment = {};
+    
+    for (final region in regions) {
+      if (region.type == _RegionType.speech && region.originalSegmentId != null) {
+        final segId = region.originalSegmentId!;
+        groupsByOriginalSegment.putIfAbsent(segId, () => []);
+        groupsByOriginalSegment[segId]!.add(region);
+      } else if (region.type == _RegionType.silence) {
+        // 무음은 가장 가까운 발화 세그먼트에 할당
+        // (일단 수집만 하고 나중에 할당)
+      }
+    }
 
-    for (int i = 0; i < regions.length; i++) {
-      final region = regions[i];
+    // 각 원래 세그먼트별로 처리
+    for (final segId in groupsByOriginalSegment.keys.toList()..sort()) {
+      final speechRegions = groupsByOriginalSegment[segId]!;
+      if (speechRegions.isEmpty) continue;
+
+      // 이 세그먼트의 시간 범위
+      final segStart = speechRegions.first.startSec;
+      final segEnd = speechRegions.last.endSec;
+
+      // 이 세그먼트 범위 내의 무음 찾기
+      final segmentSilences = regions
+          .where((r) => 
+              r.type == _RegionType.silence &&
+              r.startSec >= segStart &&
+              r.endSec <= segEnd)
+          .map((r) => r.silenceData!)
+          .toList();
+
+      // 단어 리스트 생성
+      final words = <WordSegment>[];
+      final textParts = <String>[];
       
-      if (currentGroup.isEmpty) {
-        currentGroup.add(region);
-        continue;
+      for (int i = 0; i < speechRegions.length; i++) {
+        final region = speechRegions[i];
+        if (region.wordData == null) continue;
+
+        final word = region.wordData!;
+        words.add(WordSegment(
+          index: i,
+          word: word.word,
+          startSec: region.startSec,
+          endSec: region.endSec,
+          score: word.score,
+        ));
+        textParts.add(word.word);
       }
 
-      // 이전 구간과 현재 구간 사이의 간격 확인
-      final lastRegion = currentGroup.last;
-      final gap = region.startSec - lastRegion.endSec;
+      if (words.isEmpty) continue;
 
-      // 큰 간격(0.3초 이상)이 있으면 새 세그먼트로 분리
-      // 단, 무음 구간은 세그먼트에 포함
-      if (gap >= 0.3 && region.type == _RegionType.speech) {
-        // 현재 그룹으로 세그먼트 생성
-        final segment = _createSegmentFromGroup(currentGroup, segmentId, regions);
-        if (segment != null) {
-          segments.add(segment);
-          segmentId++;
-        }
-        
-        // 새 그룹 시작
-        currentGroup = [region];
-      } else {
-        currentGroup.add(region);
+      final segment = WhisperSegment(
+        id: segId,
+        startSec: words.first.startSec,
+        endSec: words.last.endSec,
+        text: textParts.join(' '),
+        words: words,
+        silences: segmentSilences,
+      );
+
+      segments.add(segment);
+      
+      if (kDebugMode) {
+        print('세그먼트 $segId 재구성: ${words.length}개 단어, ${segmentSilences.length}개 무음');
       }
     }
 
-    // 마지막 그룹 처리
-    if (currentGroup.isNotEmpty) {
-      final segment = _createSegmentFromGroup(currentGroup, segmentId, regions);
-      if (segment != null) {
-        segments.add(segment);
-      }
-    }
+    // ID 순으로 정렬
+    segments.sort((a, b) => a.id.compareTo(b.id));
 
     return segments;
   }
