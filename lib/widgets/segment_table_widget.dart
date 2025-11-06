@@ -55,6 +55,7 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
   final Set<int> _selectedSegmentIndices = {};
   int? _dragStartIndex;
   bool _isDragging = false;
+  int? _lastHoveredIndex;
 
   @override
   void initState() {
@@ -251,6 +252,42 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     });
   }
   
+  // 드래그 선택 시작
+  void _handleDragStart(int segmentIndex) {
+    setState(() {
+      _isDragging = true;
+      _dragStartIndex = segmentIndex;
+      _lastHoveredIndex = segmentIndex;
+      _selectedSegmentIndices.clear();
+      _selectedSegmentIndices.add(segmentIndex);
+    });
+  }
+  
+  // 드래그 중 호버
+  void _handleDragHover(int segmentIndex) {
+    if (!_isDragging || _dragStartIndex == null) return;
+    if (_lastHoveredIndex == segmentIndex) return;
+    
+    setState(() {
+      _lastHoveredIndex = segmentIndex;
+      _selectedSegmentIndices.clear();
+      final start = _dragStartIndex! < segmentIndex ? _dragStartIndex! : segmentIndex;
+      final end = _dragStartIndex! > segmentIndex ? _dragStartIndex! : segmentIndex;
+      
+      for (int i = start; i <= end; i++) {
+        _selectedSegmentIndices.add(i);
+      }
+    });
+  }
+  
+  // 드래그 종료
+  void _handleDragEnd() {
+    setState(() {
+      _isDragging = false;
+      _lastHoveredIndex = null;
+    });
+  }
+  
   // 스낵바 표시 헬퍼
   void _showSnackBar(String message) {
     if (!mounted) return;
@@ -347,7 +384,7 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
                       borderRadius: BorderRadius.circular(CursorTheme.radiusSmall),
                     ),
                     child: Text(
-                      'Shift + 클릭: 범위 선택',
+                      '드래그 또는 Shift+클릭: 범위 선택',
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         color: CursorTheme.textTertiary,
                         fontWeight: FontWeight.w500,
@@ -495,36 +532,60 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     // 다중 선택 여부 확인
     final bool isMultiSelected = _selectedSegmentIndices.contains(index);
     
-    return GestureDetector(
-        key: widget.appState.segmentKeys[index],
-        behavior: HitTestBehavior.opaque,
-        onTap: () {
-          // Shift 키가 눌려있으면 다중 선택 모드
-          if (HardwareKeyboard.instance.isShiftPressed) {
-            _handleSegmentClick(index);
-          } else {
-            // 일반 탭: 비디오 이동
-            widget.onSegmentTap(index);
-            if (_selectedWordSegmentIndex != null ||
-                _selectedWordIndex != null ||
-                _selectedSilenceSegmentIndex != null ||
-                _selectedSilenceIndex != null) {
-              setState(() {
-                _selectedWordSegmentIndex = null;
-                _selectedWordIndex = null;
-                _selectedSilenceSegmentIndex = null;
-                _selectedSilenceIndex = null;
-              });
-            }
-            // 단일 클릭 시 다중 선택 초기화
-            setState(() {
-              _selectedSegmentIndices.clear();
-              _dragStartIndex = null;
-            });
+    return MouseRegion(
+      onEnter: (_) {
+        if (_isDragging) {
+          _handleDragHover(index);
+        }
+      },
+      child: Listener(
+        onPointerDown: (event) {
+          // 왼쪽 버튼 + Shift 없음 = 드래그 시작
+          if (event.buttons == 1 && !HardwareKeyboard.instance.isShiftPressed) {
+            _handleDragStart(index);
           }
         },
-        onSecondaryTap: () => _toggleSummarySegment(index),
-        onDoubleTap: () => _startEditing(index),
+        onPointerUp: (_) {
+          if (_isDragging) {
+            _handleDragEnd();
+          }
+        },
+        child: GestureDetector(
+          key: widget.appState.segmentKeys[index],
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            // 드래그 중이었으면 탭 무시
+            if (_isDragging) {
+              _handleDragEnd();
+              return;
+            }
+            
+            // Shift 키가 눌려있으면 다중 선택 모드
+            if (HardwareKeyboard.instance.isShiftPressed) {
+              _handleSegmentClick(index);
+            } else {
+              // 일반 탭: 비디오 이동
+              widget.onSegmentTap(index);
+              if (_selectedWordSegmentIndex != null ||
+                  _selectedWordIndex != null ||
+                  _selectedSilenceSegmentIndex != null ||
+                  _selectedSilenceIndex != null) {
+                setState(() {
+                  _selectedWordSegmentIndex = null;
+                  _selectedWordIndex = null;
+                  _selectedSilenceSegmentIndex = null;
+                  _selectedSilenceIndex = null;
+                });
+              }
+              // 단일 클릭 시 다중 선택 초기화
+              setState(() {
+                _selectedSegmentIndices.clear();
+                _dragStartIndex = null;
+              });
+            }
+          },
+          onSecondaryTap: () => _toggleSummarySegment(index),
+          onDoubleTap: () => _startEditing(index),
         child: Container(
           margin: const EdgeInsets.only(bottom: CursorTheme.spacingXS),
           decoration: BoxDecoration(
@@ -642,6 +703,7 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
               ],
             ),
           ),
+        ),
         ),
       ),
     );
