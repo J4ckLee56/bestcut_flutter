@@ -118,6 +118,9 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
       _selectedWordIndex = wordIndex;
       _selectedSilenceSegmentIndex = null;
       _selectedSilenceIndex = null;
+      // 단어 클릭 시 다중 선택 초기화
+      _selectedSegmentIndices.clear();
+      _dragStartIndex = null;
     });
   }
 
@@ -151,6 +154,19 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     else if (key == LogicalKeyboardKey.keyM) {
       _handleMergeSegments();
     }
+    // Escape: 선택 취소
+    else if (key == LogicalKeyboardKey.escape) {
+      setState(() {
+        _selectedSegmentIndices.clear();
+        _dragStartIndex = null;
+        _isDragging = false;
+      });
+    }
+  }
+  
+  // Shift 키가 눌려있는지 확인
+  bool _isShiftPressed(PointerDownEvent event) {
+    return HardwareKeyboard.instance.isShiftPressed;
   }
   
   // 세그먼트 분할 처리
@@ -203,36 +219,35 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     }
   }
   
-  // 세그먼트 다중 선택 시작
-  void _handleSegmentDragStart(int segmentIndex) {
+  // 세그먼트 클릭 (Shift 키 지원)
+  void _handleSegmentClick(int segmentIndex) {
+    // Shift 키가 눌려있으면 범위 선택
+    if (HardwareKeyboard.instance.isShiftPressed) {
+      setState(() {
+        if (_dragStartIndex == null) {
+          // 첫 번째 선택
+          _dragStartIndex = segmentIndex;
+          _selectedSegmentIndices.clear();
+          _selectedSegmentIndices.add(segmentIndex);
+        } else {
+          // 범위 선택
+          _selectedSegmentIndices.clear();
+          final start = _dragStartIndex! < segmentIndex ? _dragStartIndex! : segmentIndex;
+          final end = _dragStartIndex! > segmentIndex ? _dragStartIndex! : segmentIndex;
+          
+          for (int i = start; i <= end; i++) {
+            _selectedSegmentIndices.add(i);
+          }
+        }
+      });
+      return;
+    }
+    
+    // Shift 없이 클릭하면 기존 선택 초기화
     setState(() {
       _dragStartIndex = segmentIndex;
-      _isDragging = true;
       _selectedSegmentIndices.clear();
       _selectedSegmentIndices.add(segmentIndex);
-    });
-  }
-  
-  // 세그먼트 드래그 업데이트
-  void _handleSegmentDragUpdate(int segmentIndex) {
-    if (!_isDragging || _dragStartIndex == null) return;
-    
-    setState(() {
-      _selectedSegmentIndices.clear();
-      final start = _dragStartIndex! < segmentIndex ? _dragStartIndex! : segmentIndex;
-      final end = _dragStartIndex! > segmentIndex ? _dragStartIndex! : segmentIndex;
-      
-      for (int i = start; i <= end; i++) {
-        _selectedSegmentIndices.add(i);
-      }
-    });
-  }
-  
-  // 세그먼트 드래그 종료
-  void _handleSegmentDragEnd() {
-    setState(() {
-      _isDragging = false;
-      // dragStartIndex는 유지 (다중 선택 상태 유지)
     });
   }
   
@@ -321,6 +336,25 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
                 ),
                 const Spacer(),
                 // 단축키 안내
+                if (_selectedSegmentIndices.isEmpty && _selectedWordSegmentIndex == null)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: CursorTheme.spacingXS,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: CursorTheme.textTertiary.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(CursorTheme.radiusSmall),
+                    ),
+                    child: Text(
+                      'Shift + 클릭: 범위 선택',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: CursorTheme.textTertiary,
+                        fontWeight: FontWeight.w500,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ),
                 if (_selectedWordSegmentIndex != null && _selectedWordIndex != null)
                   Container(
                     padding: const EdgeInsets.symmetric(
@@ -461,33 +495,36 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     // 다중 선택 여부 확인
     final bool isMultiSelected = _selectedSegmentIndices.contains(index);
     
-    return MouseRegion(
-      onEnter: (_) {
-        if (_isDragging) {
-          _handleSegmentDragUpdate(index);
-        }
-      },
-      child: GestureDetector(
+    return GestureDetector(
         key: widget.appState.segmentKeys[index],
-        behavior: HitTestBehavior.deferToChild,  // 자식(단어) 클릭을 우선
+        behavior: HitTestBehavior.opaque,
         onTap: () {
-          widget.onSegmentTap(index);
-          if (_selectedWordSegmentIndex != null ||
-              _selectedWordIndex != null ||
-              _selectedSilenceSegmentIndex != null ||
-              _selectedSilenceIndex != null) {
+          // Shift 키가 눌려있으면 다중 선택 모드
+          if (HardwareKeyboard.instance.isShiftPressed) {
+            _handleSegmentClick(index);
+          } else {
+            // 일반 탭: 비디오 이동
+            widget.onSegmentTap(index);
+            if (_selectedWordSegmentIndex != null ||
+                _selectedWordIndex != null ||
+                _selectedSilenceSegmentIndex != null ||
+                _selectedSilenceIndex != null) {
+              setState(() {
+                _selectedWordSegmentIndex = null;
+                _selectedWordIndex = null;
+                _selectedSilenceSegmentIndex = null;
+                _selectedSilenceIndex = null;
+              });
+            }
+            // 단일 클릭 시 다중 선택 초기화
             setState(() {
-              _selectedWordSegmentIndex = null;
-              _selectedWordIndex = null;
-              _selectedSilenceSegmentIndex = null;
-              _selectedSilenceIndex = null;
+              _selectedSegmentIndices.clear();
+              _dragStartIndex = null;
             });
           }
         },
         onSecondaryTap: () => _toggleSummarySegment(index),
         onDoubleTap: () => _startEditing(index),
-        onLongPressStart: (_) => _handleSegmentDragStart(index),
-        onLongPressEnd: (_) => _handleSegmentDragEnd(),
         child: Container(
           margin: const EdgeInsets.only(bottom: CursorTheme.spacingXS),
           decoration: BoxDecoration(
