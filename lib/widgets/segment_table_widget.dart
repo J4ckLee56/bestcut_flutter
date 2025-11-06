@@ -178,6 +178,18 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     // 단어 또는 무음이 선택되어 있어야 함
     if (_selectedWordSegmentIndex != null && _selectedWordIndex != null) {
       // 단어 기준 분할
+      final segment = widget.appState.segments[_selectedWordSegmentIndex!];
+      final word = segment.words[_selectedWordIndex!];
+      
+      if (kDebugMode) {
+        print('📍 단어 분할 시도:');
+        print('  - 세그먼트 인덱스: $_selectedWordSegmentIndex');
+        print('  - 단어 인덱스: $_selectedWordIndex');
+        print('  - 단어: "${word.word}"');
+        print('  - 세그먼트 총 단어 수: ${segment.words.length}');
+        print('  - wordIndex <= 0? ${_selectedWordIndex! <= 0}');
+      }
+      
       final success = widget.appState.splitSegmentAtWord(
         _selectedWordSegmentIndex!,
         _selectedWordIndex!,
