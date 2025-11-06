@@ -2436,7 +2436,7 @@ ${jsonEncode(formatted)}
     // 보수적 탐색: 단어 시작 앞부분 확장 (앞부분 잘림 방지)
     const double searchBefore = 0.2;  // 앞으로 200ms (확장: 단어 시작이 늦게 잡히는 문제 해결)
     const double searchAfter = 0.2;   // 뒤로 200ms
-    const double voiceThreshold = -35.0; // -35dB 이상은 음성 (더 명확한 음성만)
+    const double voiceThreshold = -40.0; // -40dB 이상은 음성
 
     // 이전 단어와 겹치지 않도록 최소 시작 시간 설정
     final minStart = previousWordEnd ?? 0.0;
@@ -2469,7 +2469,7 @@ ${jsonEncode(formatted)}
     // 보수적 탐색: 탐색 범위 축소 (WhisperX 타이밍 신뢰)
     const double searchBefore = 0.1;  // 앞으로 100ms (축소)
     const double searchAfter = 0.05;  // 뒤로 50ms (축소)
-    const double voiceThreshold = -35.0; // -35dB 이상은 음성 (더 명확한 음성만)
+    const double voiceThreshold = -40.0; // -40dB 이상은 음성
 
     // 다음 단어와 겹치지 않도록 최대 끝 시간 설정
     final maxEnd = nextWordStart ?? double.infinity;
