@@ -2744,7 +2744,6 @@ ${jsonEncode(formatted)}
 
       result.add(segment.copyWith(
         words: refinedWords,
-        silences: const [],
         startSec: segmentStartForCopy,
         endSec: segmentEndForCopy,
       ));
@@ -3391,12 +3390,15 @@ ${jsonEncode(formatted)}
 
   /// 세그먼트 끝 무음 길이 계산
   double _getTrailingSilenceDuration(WhisperSegment segment) {
-    if (segment.silences.isEmpty) return 0.0;
+    // 마지막 토큰이 무음인지 확인
+    if (segment.words.isEmpty) return 0.0;
     
-    final lastSilence = segment.silences.last;
+    final lastToken = segment.words.last;
+    if (!lastToken.isSilence) return 0.0;
+    
     // 세그먼트 끝에서 0.1초 이내에 시작하는 무음만 "끝 무음"으로 간주
-    if (segment.endSec - lastSilence.startSec <= 0.1) {
-      return lastSilence.duration;
+    if (segment.endSec - lastToken.startSec <= 0.1) {
+      return lastToken.duration;
     }
     return 0.0;
   }
@@ -3406,19 +3408,19 @@ ${jsonEncode(formatted)}
     // 세그먼트 내 단어들과 무음들을 시간순으로 정렬하여 분석
     if (segment.words.length < 3) return null; // 너무 짧으면 분할 안 함
     
-    // 각 단어 뒤에 긴 무음이 있는지 확인
-    for (int wordIdx = 1; wordIdx < segment.words.length - 1; wordIdx++) {
-      final word = segment.words[wordIdx];
+    // 긴 무음 찾기 (words에 포함되어 있음)
+    for (int i = 1; i < segment.words.length - 1; i++) {
+      final token = segment.words[i];
       
-      // 이 단어 직후에 긴 무음이 있는지 확인
-      for (final silence in segment.silences) {
-        if (silence.startSec >= word.endSec - 0.05 && 
-            silence.startSec <= word.endSec + 0.05 &&
-            silence.duration >= minSilenceDuration) {
-          // 분할 후 양쪽 세그먼트가 최소 2개 이상의 단어를 가지는지 확인
-          if (wordIdx >= 1 && segment.words.length - wordIdx - 1 >= 1) {
-            return wordIdx; // 이 단어 뒤에서 분할
-          }
+      // 무음이고 충분히 긴 경우
+      if (token.isSilence && token.duration >= minSilenceDuration) {
+        // 분할 후 양쪽 세그먼트가 최소 1개 이상의 단어를 가지는지 확인
+        // (무음 이전에 최소 1개, 무음 이후에 최소 1개의 단어 필요)
+        final wordsBeforeSilence = segment.words.sublist(0, i).where((w) => !w.isSilence).length;
+        final wordsAfterSilence = segment.words.sublist(i + 1).where((w) => !w.isSilence).length;
+        
+        if (wordsBeforeSilence >= 1 && wordsAfterSilence >= 1) {
+          return i; // 이 무음 뒤에서 분할 (무음은 첫 번째 세그먼트에 포함)
         }
       }
     }
@@ -3431,38 +3433,25 @@ ${jsonEncode(formatted)}
     final firstWords = segment.words.sublist(0, splitWordIndex + 1);
     final secondWords = segment.words.sublist(splitWordIndex + 1);
     
-    final lastWordEnd = firstWords.last.endSec;
-    
-    // 분할점 직후의 무음 찾기 (이 무음이 첫 번째 세그먼트의 끝이 됨)
-    SilenceSegment? trailingSilence;
-    for (final silence in segment.silences) {
-      if (silence.startSec >= lastWordEnd - 0.05 && 
-          silence.startSec <= lastWordEnd + 0.05 &&
-          silence.duration >= 0.3) {
-        trailingSilence = silence;
-        break;
-      }
+    // 인덱스 재조정
+    for (int i = 0; i < firstWords.length; i++) {
+      firstWords[i] = firstWords[i].copyWith(index: i);
+    }
+    for (int i = 0; i < secondWords.length; i++) {
+      secondWords[i] = secondWords[i].copyWith(index: i);
     }
     
-    // 첫 번째 세그먼트의 실제 끝 시간 (무음 포함)
-    final firstSegmentEnd = trailingSilence?.endSec ?? lastWordEnd;
-    
-    // 무음 분할: 첫 번째 세그먼트 끝 시간 기준
-    final firstSilences = segment.silences.where((s) => s.endSec <= firstSegmentEnd + 0.05).toList();
-    final secondSilences = segment.silences.where((s) => s.startSec >= firstSegmentEnd - 0.05).toList();
-    
-    // 텍스트 분할
-    final firstText = firstWords.map((w) => w.word).join(' ');
-    final secondText = secondWords.map((w) => w.word).join(' ');
+    // text는 단어만 (무음 제외)
+    final firstText = firstWords.where((w) => !w.isSilence).map((w) => w.word).join(' ');
+    final secondText = secondWords.where((w) => !w.isSilence).map((w) => w.word).join(' ');
     
     final firstSegment = WhisperSegment(
       id: segment.id,
       startSec: segment.startSec,
-      endSec: firstSegmentEnd, // 무음 포함된 끝 시간
+      endSec: firstWords.last.endSec,
       text: firstText,
       confidence: segment.confidence,
       words: firstWords,
-      silences: firstSilences,
     );
     
     final secondSegment = WhisperSegment(
@@ -3472,7 +3461,6 @@ ${jsonEncode(formatted)}
       text: secondText,
       confidence: segment.confidence,
       words: secondWords,
-      silences: secondSilences,
     );
     
     return [firstSegment, secondSegment];
