@@ -348,13 +348,13 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
                       vertical: 2,
                     ),
                     decoration: BoxDecoration(
-                      color: CursorTheme.primary.withOpacity(0.1),
+                      color: CursorTheme.cursorBlueLight.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(CursorTheme.radiusSmall),
                     ),
                     child: Text(
                       '단축키 M: ${_selectedSegmentIndices.length}개 세그먼트 병합',
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: CursorTheme.primary,
+                        color: CursorTheme.cursorBlueLight,
                         fontWeight: FontWeight.w500,
                         fontSize: 10,
                       ),
@@ -490,7 +490,7 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
           margin: const EdgeInsets.only(bottom: CursorTheme.spacingXS),
           decoration: BoxDecoration(
             color: isMultiSelected
-                ? CursorTheme.primary.withOpacity(0.2)
+                ? CursorTheme.cursorBlueLight.withOpacity(0.2)
                 : isPlaying
                     ? CursorTheme.cursorBlue.withOpacity(0.2)
                     : isSelected 
@@ -501,7 +501,7 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
             borderRadius: BorderRadius.circular(CursorTheme.radiusSmall),
             border: Border.all(
               color: isMultiSelected
-                  ? CursorTheme.primary
+                  ? CursorTheme.cursorBlueLight
                   : isPlaying
                       ? CursorTheme.cursorBlue
                       : isSelected
@@ -512,13 +512,11 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
               width: isMultiSelected || isPlaying || isSelected ? 2 : 1,
             ),
           ),
-        ),
-      ),
-        child: Padding(
-          padding: const EdgeInsets.all(CursorTheme.spacingS),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+          child: Padding(
+            padding: const EdgeInsets.all(CursorTheme.spacingS),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
               // 상단: 시간 정보 + 요약 표시
               Row(
                 children: [
@@ -602,7 +600,8 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
                       segment,
                       isActive: isPlaying || isSelected,
                     ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
