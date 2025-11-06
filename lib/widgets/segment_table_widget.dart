@@ -209,7 +209,7 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
           _selectedSilenceSegmentIndex = null;
           _selectedSilenceIndex = null;
         });
-        _showSnackBar('✂️ 세그먼트 분할 완료 (무음 기준)');
+        _showSnackBar('✂️ 세그먼트 분할 완료');
       } else {
         _showSnackBar('❌ 세그먼트 분할 실패');
       }
@@ -218,7 +218,7 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     }
   }
   
-  // 무음 기준으로 세그먼트 분할
+  // 무음 기준으로 세그먼트 분할 (무음 앞에서 분할)
   bool _splitSegmentAtSilence(int segmentIndex, int silenceIndex) {
     final segment = widget.appState.segments[segmentIndex];
     
@@ -231,13 +231,11 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     
     final silence = segment.silences[silenceIndex];
     
-    // 무음 구간의 중간 지점을 기준으로 분할할 단어 찾기
-    final splitTime = (silence.startSec + silence.endSec) / 2;
-    
-    // splitTime 이후의 첫 번째 단어 인덱스 찾기
+    // 무음 앞에서 분할: 무음 시작 시점 이후의 첫 번째 단어 찾기
+    // (무음 바로 다음 단어부터 새 세그먼트)
     int? wordIndexToSplit;
     for (int i = 0; i < segment.words.length; i++) {
-      if (segment.words[i].startSec >= splitTime) {
+      if (segment.words[i].startSec >= silence.startSec) {
         wordIndexToSplit = i;
         break;
       }
@@ -245,12 +243,12 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     
     if (wordIndexToSplit == null || wordIndexToSplit == 0) {
       if (kDebugMode) {
-        print('❌ 무음 위치에서 분할할 단어를 찾을 수 없습니다.');
+        print('❌ 무음 앞에서 분할할 단어를 찾을 수 없습니다.');
       }
       return false;
     }
     
-    // 찾은 단어 기준으로 분할
+    // 찾은 단어 기준으로 분할 (해당 단어부터 새 세그먼트)
     return widget.appState.splitSegmentAtWord(segmentIndex, wordIndexToSplit);
   }
   
@@ -477,7 +475,7 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
                       borderRadius: BorderRadius.circular(CursorTheme.radiusSmall),
                     ),
                     child: Text(
-                      '단축키 S: 선택한 무음 기준으로 분할',
+                      '단축키 S: 선택한 무음 앞에서 분할',
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         color: CursorTheme.warning,
                         fontWeight: FontWeight.w500,
