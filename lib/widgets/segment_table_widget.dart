@@ -213,6 +213,88 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     }
   }
   
+  // 무음만 있는 세그먼트를 만들기 위한 수동 분할
+  // splitTime 이전은 무음만, 이후는 모든 단어
+  bool _splitSegmentAtSilenceManual(int segmentIndex, double splitTime) {
+    final segment = widget.appState.segments[segmentIndex];
+    
+    // 모든 단어는 splitTime 이후에 있어야 함
+    final firstWords = <WordSegment>[];
+    final secondWords = List<WordSegment>.from(segment.words);
+    
+    final firstSilences = <SilenceSegment>[];
+    final secondSilences = <SilenceSegment>[];
+    
+    // 무음 재분배
+    for (final silence in segment.silences) {
+      if (silence.endSec <= splitTime) {
+        firstSilences.add(silence);
+      } else if (silence.startSec >= splitTime) {
+        secondSilences.add(silence);
+      } else {
+        // 무음이 분할 지점을 걸치는 경우: 분할
+        firstSilences.add(SilenceSegment(
+          startSec: silence.startSec,
+          endSec: splitTime,
+          duration: splitTime - silence.startSec,
+        ));
+        secondSilences.add(SilenceSegment(
+          startSec: splitTime,
+          endSec: silence.endSec,
+          duration: silence.endSec - splitTime,
+        ));
+      }
+    }
+    
+    // 첫 번째 세그먼트: 무음만 (단어 없음)
+    final firstSegment = WhisperSegment(
+      id: segment.id,
+      startSec: segment.startSec,
+      endSec: splitTime,
+      text: '', // 무음만 있으므로 빈 문자열
+      words: firstWords,
+      silences: firstSilences,
+      isSummary: segment.isSummary,
+    );
+    
+    // 두 번째 세그먼트: 모든 단어
+    final secondSegment = WhisperSegment(
+      id: segment.id + 1,
+      startSec: splitTime,
+      endSec: segment.endSec,
+      text: secondWords.map((w) => w.word).join(' '),
+      words: secondWords,
+      silences: secondSilences,
+      isSummary: segment.isSummary,
+    );
+    
+    // AppState에 직접 반영
+    final segments = widget.appState.segments;
+    segments[segmentIndex] = firstSegment;
+    segments.insert(segmentIndex + 1, secondSegment);
+    
+    // ID 재조정
+    for (int i = segmentIndex + 2; i < segments.length; i++) {
+      segments[i] = WhisperSegment(
+        id: segments[i].id + 1,
+        startSec: segments[i].startSec,
+        endSec: segments[i].endSec,
+        text: segments[i].text,
+        words: segments[i].words,
+        silences: segments[i].silences,
+        isSummary: segments[i].isSummary,
+      );
+    }
+    
+    widget.appState.notifyListeners();
+    
+    if (kDebugMode) {
+      print('✂️ 무음만 있는 세그먼트 생성: 세그먼트 #${segment.id} → #${firstSegment.id} (무음만) + #${secondSegment.id} (단어들)');
+    }
+    
+    return true;
+  }
+  
   // 무음 기준으로 세그먼트 분할 (무음 뒤에서 분할)
   bool _splitSegmentAtSilence(int segmentIndex, int silenceIndex) {
     final segment = widget.appState.segments[segmentIndex];
@@ -236,9 +318,7 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
       }
     }
     
-    // wordIndexToSplit이 null: 무음이 마지막 → 분할 불가
-    // wordIndexToSplit이 0: 무음이 맨 앞 → 분할 불가 (단어칩과 동일)
-    // wordIndexToSplit이 1 이상: 정상 분할 가능
+    // wordIndexToSplit이 null: 무음이 마지막 → 분할 불가 (뒤에 토큰 없음)
     if (wordIndexToSplit == null) {
       if (kDebugMode) {
         print('❌ 무음 뒤에 단어가 없습니다. 무음이 세그먼트 마지막에 있어 분할 불가능합니다.');
@@ -246,14 +326,20 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
       return false;
     }
     
+    // wordIndexToSplit == 0: 무음 앞에 단어가 없음
+    //   → 분할하면 세그먼트1은 무음만, 세그먼트2는 모든 단어
+    //   → 세그먼트1에 최소 1개 토큰(무음) 있으므로 허용
+    // wordIndexToSplit >= 1: 정상 분할 (무음 앞에 단어 있음)
+    
+    // splitSegmentAtWord는 wordIndex <= 0을 막지만,
+    // 무음만 있는 세그먼트를 만들기 위해서는 wordIndex == 0을 허용해야 함
+    // → 특별 처리: wordIndexToSplit == 0일 때는 수동으로 분할
     if (wordIndexToSplit == 0) {
-      if (kDebugMode) {
-        print('❌ 맨 앞 무음은 분할할 수 없습니다. (맨 앞 단어와 동일한 제약)');
-      }
-      return false;
+      // 무음만 있는 첫 번째 세그먼트를 만들기 위한 특별 분할
+      return _splitSegmentAtSilenceManual(segmentIndex, silence.endSec);
     }
     
-    // wordIndexToSplit >= 1: 정상 분할
+    // wordIndexToSplit >= 1: 정상적으로 splitSegmentAtWord 사용
     return widget.appState.splitSegmentAtWord(segmentIndex, wordIndexToSplit);
   }
   
