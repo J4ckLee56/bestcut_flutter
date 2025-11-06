@@ -503,7 +503,7 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
           decoration: CursorTheme.containerDecoration(
             backgroundColor: background,
             borderColor: borderColor,
-            borderRadius: BorderRadius.circular(CursorTheme.radiusSmall),
+            borderRadius: CursorTheme.radiusSmall,
           ),
           child: Text(
             word.word,
