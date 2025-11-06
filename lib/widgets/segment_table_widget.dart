@@ -188,11 +188,7 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
           _selectedWordSegmentIndex = null;
           _selectedWordIndex = null;
         });
-        if (_selectedWordIndex == 0) {
-          _showSnackBar('✂️ 세그먼트 분할 완료 (무음만 있는 세그먼트 생성)');
-        } else {
-          _showSnackBar('✂️ 세그먼트 분할 완료');
-        }
+        _showSnackBar('✂️ 세그먼트 분할 완료');
       } else {
         _showSnackBar('❌ 세그먼트 분할 실패');
       }
@@ -230,11 +226,11 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     
     final silence = segment.silences[silenceIndex];
     
-    // 무음 앞에서 분할: 무음 시작 시점 이후의 첫 번째 단어 찾기
-    // (무음 바로 다음 단어부터 새 세그먼트)
+    // 무음 뒤의 첫 번째 단어 찾기
+    // 무음 끝 시점(endSec) 이후의 첫 번째 단어부터 새 세그먼트
     int? wordIndexToSplit;
     for (int i = 0; i < segment.words.length; i++) {
-      if (segment.words[i].startSec >= silence.startSec) {
+      if (segment.words[i].startSec >= silence.endSec) {
         wordIndexToSplit = i;
         break;
       }
@@ -242,12 +238,13 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     
     if (wordIndexToSplit == null || wordIndexToSplit == 0) {
       if (kDebugMode) {
-        print('❌ 무음 앞에서 분할할 단어를 찾을 수 없습니다.');
+        print('❌ 무음 뒤에 분할할 단어를 찾을 수 없습니다. (무음 뒤에 최소 1개 단어 필요)');
       }
       return false;
     }
     
     // 찾은 단어 기준으로 분할 (해당 단어부터 새 세그먼트)
+    // 결과: [단어들...무음] | [단어들...]
     return widget.appState.splitSegmentAtWord(segmentIndex, wordIndexToSplit);
   }
   
