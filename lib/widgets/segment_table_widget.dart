@@ -228,6 +228,7 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     
     return GestureDetector(
       key: widget.appState.segmentKeys[index],
+      behavior: HitTestBehavior.deferToChild,  // 자식(단어) 클릭을 우선
       onTap: () => widget.onSegmentTap(index),
       onSecondaryTap: () => _toggleSummarySegment(index),
       onDoubleTap: () => _startEditing(index),
