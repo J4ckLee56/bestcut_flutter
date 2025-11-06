@@ -2165,6 +2165,7 @@ ${jsonEncode(formatted)}
     }
 
     final List<WhisperSegment> result = [];
+    double? lastWordEndInPreviousSegment;  // 이전 세그먼트의 마지막 단어 끝 시간
 
     for (final segment in segments) {
       if (segment.words.isEmpty) {
@@ -2181,8 +2182,11 @@ ${jsonEncode(formatted)}
         final approximateStart = word.startSec;
         final approximateEnd = word.endSec;
 
-        // 이전 단어 정보: 이미 조정된 단어의 끝 시간 사용
-        final previousWordEnd = i > 0 ? refinedWords[i - 1].endSec : null;
+        // 이전 단어 정보: 같은 세그먼트 내 또는 이전 세그먼트의 마지막 단어
+        final previousWordEnd = i > 0 
+            ? refinedWords[i - 1].endSec  // 같은 세그먼트 내
+            : lastWordEndInPreviousSegment;  // 이전 세그먼트의 마지막 단어
+        
         // 다음 단어 정보: 아직 조정 안 된 원본 시간 사용 (참고용)
         final nextWordStart = i < segment.words.length - 1 ? segment.words[i + 1].startSec : null;
 
@@ -2207,7 +2211,8 @@ ${jsonEncode(formatted)}
           final startDiff = (finalStart - approximateStart).abs();
           final endDiff = (finalEnd - approximateEnd).abs();
           final adjustmentMark = (startDiff > 0.01 || endDiff > 0.01) ? '🔧' : '✓';
-          print('  $adjustmentMark 단어 #${i + 1} "${word.word}": ${approximateStart.toStringAsFixed(2)}-${approximateEnd.toStringAsFixed(2)}s → ${finalStart.toStringAsFixed(2)}-${finalEnd.toStringAsFixed(2)}s');
+          final prevInfo = previousWordEnd != null ? ' (prev=${previousWordEnd.toStringAsFixed(2)})' : '';
+          print('  $adjustmentMark 단어 #${i + 1} "${word.word}": ${approximateStart.toStringAsFixed(2)}-${approximateEnd.toStringAsFixed(2)}s → ${finalStart.toStringAsFixed(2)}-${finalEnd.toStringAsFixed(2)}s$prevInfo');
         }
       }
 
@@ -2217,6 +2222,11 @@ ${jsonEncode(formatted)}
         startSec: refinedWords.first.startSec,
         endSec: refinedWords.last.endSec,
       ));
+      
+      // 다음 세그먼트를 위해 현재 세그먼트 마지막 단어의 끝 시간 저장
+      if (refinedWords.isNotEmpty) {
+        lastWordEndInPreviousSegment = refinedWords.last.endSec;
+      }
     }
 
     return result;
