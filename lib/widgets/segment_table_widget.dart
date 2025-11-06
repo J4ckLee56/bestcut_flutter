@@ -444,6 +444,7 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
       widgets.add(_buildWordChip(
         context,
         segmentIndex,  // 세그먼트 인덱스 전달
+        segment.id,  // 실제 세그먼트 ID도 전달
         word,
         isHighlighted: currentSec >= word.startSec && currentSec < word.endSec,
       ));
@@ -481,7 +482,7 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     );
   }
 
-  Widget _buildWordChip(BuildContext context, int segmentIndex, WordSegment word, {required bool isHighlighted}) {
+  Widget _buildWordChip(BuildContext context, int segmentIndex, int segmentId, WordSegment word, {required bool isHighlighted}) {
     final background = isHighlighted
         ? CursorTheme.cursorBlue.withOpacity(0.2)
         : CursorTheme.backgroundSecondary;
@@ -491,7 +492,7 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
       message: '${_formatTimeFromSeconds(word.startSec)} ~ ${_formatTimeFromSeconds(word.endSec)}',
       child: GestureDetector(
         onTap: () {
-          if (kDebugMode) print('🖱️ 단어 "${word.word}" 클릭됨 (세그먼트 $segmentIndex)');
+          if (kDebugMode) print('🖱️ 단어 "${word.word}" 클릭됨 (인덱스 $segmentIndex, ID $segmentId)');
           widget.onSegmentTap(segmentIndex);  // 세그먼트 클릭과 동일하게 동작
         },
         behavior: HitTestBehavior.opaque,  // 클릭 영역을 명확히 지정하고 부모 제스처 차단
