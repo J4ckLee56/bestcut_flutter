@@ -570,17 +570,19 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
     );
   }
   
-  // 시간 포맷팅 헬퍼 메서드
+  // 시간 포맷팅 헬퍼 메서드 (밀리초 포함)
   String _formatDuration(Duration duration) {
     String twoDigits(int n) => n.toString().padLeft(2, '0');
     final hours = twoDigits(duration.inHours);
     final minutes = twoDigits(duration.inMinutes.remainder(60));
     final seconds = twoDigits(duration.inSeconds.remainder(60));
+    final milliseconds = (duration.inMilliseconds.remainder(1000) / 10).floor(); // 0-99 (0.01초 단위)
+    final centiseconds = twoDigits(milliseconds);
     
     if (duration.inHours > 0) {
-      return '$hours:$minutes:$seconds';
+      return '$hours:$minutes:$seconds.$centiseconds';
     } else {
-      return '$minutes:$seconds';
+      return '$minutes:$seconds.$centiseconds';
     }
   }
 }
