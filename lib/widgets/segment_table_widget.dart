@@ -227,98 +227,51 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
   
   // 무음만 있는 세그먼트를 만들기 위한 수동 분할
   // splitTime 이전은 무음만, 이후는 모든 단어
+  // 더 이상 필요 없음: words에 무음이 포함되어 있으므로 직접 AppState.splitSegmentAtWord 사용 불가
+  // 대신 splitTime 이후의 첫 번째 단어를 찾아서 그 단어 인덱스로 분할
   bool _splitSegmentAtSilenceManual(int segmentIndex, double splitTime) {
     final segment = widget.appState.segments[segmentIndex];
     
-    // 모든 단어는 splitTime 이후에 있어야 함
-    final firstWords = <WordSegment>[];
-    final secondWords = List<WordSegment>.from(segment.words);
-    
-    final firstSilences = <SilenceSegment>[];
-    final secondSilences = <SilenceSegment>[];
-    
-    // 무음 재분배
-    for (final silence in segment.silences) {
-      if (silence.endSec <= splitTime) {
-        firstSilences.add(silence);
-      } else if (silence.startSec >= splitTime) {
-        secondSilences.add(silence);
-      } else {
-        // 무음이 분할 지점을 걸치는 경우: 분할
-        firstSilences.add(SilenceSegment(
-          startSec: silence.startSec,
-          endSec: splitTime,
-          duration: splitTime - silence.startSec,
-        ));
-        secondSilences.add(SilenceSegment(
-          startSec: splitTime,
-          endSec: silence.endSec,
-          duration: silence.endSec - splitTime,
-        ));
+    // splitTime 이후의 첫 번째 단어 찾기
+    int wordIndexToSplit = 0;
+    for (int i = 0; i < segment.words.length; i++) {
+      if (segment.words[i].startSec >= splitTime) {
+        wordIndexToSplit = i;
+        break;
       }
     }
     
-    // 첫 번째 세그먼트: 무음만 (단어 없음)
-    final firstSegment = WhisperSegment(
-      id: segment.id,
-      startSec: segment.startSec,
-      endSec: splitTime,
-      text: '', // 무음만 있으므로 빈 문자열
-      words: firstWords,
-      silences: firstSilences,
-      isSummary: segment.isSummary,
-    );
-    
-    // 두 번째 세그먼트: 모든 단어
-    final secondSegment = WhisperSegment(
-      id: segment.id + 1,
-      startSec: splitTime,
-      endSec: segment.endSec,
-      text: secondWords.map((w) => w.word).join(' '),
-      words: secondWords,
-      silences: secondSilences,
-      isSummary: segment.isSummary,
-    );
-    
-    // AppState에 직접 반영
-    final segments = widget.appState.segments;
-    segments[segmentIndex] = firstSegment;
-    segments.insert(segmentIndex + 1, secondSegment);
-    
-    // ID 재조정
-    for (int i = segmentIndex + 2; i < segments.length; i++) {
-      segments[i] = WhisperSegment(
-        id: segments[i].id + 1,
-        startSec: segments[i].startSec,
-        endSec: segments[i].endSec,
-        text: segments[i].text,
-        words: segments[i].words,
-        silences: segments[i].silences,
-        isSummary: segments[i].isSummary,
-      );
+    if (wordIndexToSplit == 0) {
+      if (kDebugMode) {
+        print('❌ splitTime 이후에 단어를 찾을 수 없습니다.');
+      }
+      return false;
     }
     
-    widget.appState.notifyListeners();
-    
-    if (kDebugMode) {
-      print('✂️ 무음만 있는 세그먼트 생성: 세그먼트 #${segment.id} → #${firstSegment.id} (무음만) + #${secondSegment.id} (단어들)');
-    }
-    
-    return true;
+    // AppState의 splitSegmentAtWord 사용
+    return widget.appState.splitSegmentAtWord(segmentIndex, wordIndexToSplit);
   }
   
   // 무음 기준으로 세그먼트 분할 (무음 뒤에서 분할)
   bool _splitSegmentAtSilence(int segmentIndex, int silenceIndex) {
     final segment = widget.appState.segments[segmentIndex];
     
-    if (silenceIndex < 0 || silenceIndex >= segment.silences.length) {
+    // silenceIndex는 이제 words 배열의 인덱스
+    // (무음도 words에 포함되어 있음)
+    if (silenceIndex < 0 || silenceIndex >= segment.words.length) {
       if (kDebugMode) {
         print('❌ 잘못된 무음 인덱스: $silenceIndex');
       }
       return false;
     }
     
-    final silence = segment.silences[silenceIndex];
+    final silence = segment.words[silenceIndex];
+    if (!silence.isSilence) {
+      if (kDebugMode) {
+        print('❌ 선택된 토큰이 무음이 아닙니다: $silenceIndex');
+      }
+      return false;
+    }
     
     if (kDebugMode) {
       print('📍 무음칩 분할 시도:');
@@ -326,18 +279,17 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
       print('  - 무음 인덱스: $silenceIndex');
       print('  - 무음 시작: ${silence.startSec.toStringAsFixed(2)}s');
       print('  - 무음 끝: ${silence.endSec.toStringAsFixed(2)}s');
-      print('  - 세그먼트 총 단어 수: ${segment.words.length}');
-      print('  - 세그먼트 총 무음 수: ${segment.silences.length}');
+      print('  - 세그먼트 총 토큰 수: ${segment.words.length}');
       
-      // 세그먼트 내 모든 단어와 무음 위치 출력
+      // 세그먼트 내 모든 토큰 위치 출력
       print('  - 세그먼트 구조:');
       for (int i = 0; i < segment.words.length; i++) {
-        final word = segment.words[i];
-        print('    words[$i]: "${word.word}" (${word.startSec.toStringAsFixed(2)}s - ${word.endSec.toStringAsFixed(2)}s)');
-      }
-      for (int i = 0; i < segment.silences.length; i++) {
-        final s = segment.silences[i];
-        print('    silences[$i]: 무음 (${s.startSec.toStringAsFixed(2)}s - ${s.endSec.toStringAsFixed(2)}s)');
+        final token = segment.words[i];
+        if (token.isSilence) {
+          print('    [$i]: 무음 (${token.startSec.toStringAsFixed(2)}s - ${token.endSec.toStringAsFixed(2)}s)');
+        } else {
+          print('    [$i]: "${token.word}" (${token.startSec.toStringAsFixed(2)}s - ${token.endSec.toStringAsFixed(2)}s)');
+        }
       }
     }
     
@@ -966,36 +918,11 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
 
   Widget _buildSegmentWordWrap(BuildContext context, int segmentIndex, WhisperSegment segment, {required bool isActive}) {
     final words = segment.words;
-    final silences = segment.silences;
     
     final currentPosition = widget.appState.videoController?.value.position;
     final currentSec = (currentPosition?.inMilliseconds ?? 0) / 1000.0;
     
-    // 단어가 없고 무음만 있는 경우: 무음칩만 표시
-    if (words.isEmpty && silences.isNotEmpty) {
-      return Wrap(
-        spacing: CursorTheme.spacingXS,
-        runSpacing: CursorTheme.spacingXS,
-        children: silences.asMap().entries.map((entry) {
-          final silenceIndex = entry.key;
-          final silence = entry.value;
-          final isPlayingSilence = currentSec >= silence.startSec && currentSec < silence.endSec;
-          final isSelectedSilence = _selectedSilenceSegmentIndex == segmentIndex &&
-              _selectedSilenceIndex == silenceIndex;
-          
-          return _buildSilenceChip(
-            context,
-            segmentIndex: segmentIndex,
-            silenceIndex: silenceIndex,
-            silence: silence,
-            isPlaying: isPlayingSilence,
-            isSelected: isSelectedSilence,
-          );
-        }).toList(),
-      );
-    }
-    
-    // 단어도 없고 무음도 없는 경우: 텍스트만 표시
+    // 토큰이 없는 경우: 텍스트만 표시
     if (words.isEmpty) {
       return Text(
         segment.text,
@@ -1007,62 +934,57 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
       );
     }
 
-    // 단어와 무음을 시간 순서대로 정렬하여 표시
+    // 단어와 무음을 시간 순서대로 표시 (이미 words에 통합됨)
     final List<Widget> widgets = [];
     
-    // 방식 2: 단어와 무음을 시간순으로 배치
-    // 세그먼트에 포함된 무음들을 시간순으로 정렬
-    final sortedSilences = List<SilenceSegment>.from(silences)
-      ..sort((a, b) => a.startSec.compareTo(b.startSec));
-    
-    int silenceIndex = 0;
-    
     for (int i = 0; i < words.length; i++) {
-      final word = words[i];
+      final token = words[i];
       
-      // 현재 단어 앞에 있는 모든 무음 추가
-      while (silenceIndex < sortedSilences.length) {
-        final silence = sortedSilences[silenceIndex];
+      final isPlayingToken = currentSec >= token.startSec && currentSec < token.endSec;
+      
+      if (token.isSilence) {
+        // 무음 칩
+        final isSelectedSilence = _selectedSilenceSegmentIndex == segmentIndex &&
+            _selectedSilenceIndex == i;
         
-        // 무음이 현재 단어보다 앞에 있으면 추가
-        if (silence.endSec <= word.startSec) {
-          final currentSilenceIndex = silenceIndex;
-          final isPlayingSilence = currentSec >= silence.startSec && currentSec < silence.endSec;
-          final isSelectedSilence = _selectedSilenceSegmentIndex == segmentIndex &&
-              _selectedSilenceIndex == currentSilenceIndex;
+        widgets.add(_buildSilenceChip(
+          context,
+          segmentIndex: segmentIndex,
+          silenceIndex: i,
+          silence: token, // WordSegment를 그대로 전달 (duration getter 있음)
+          isPlaying: isPlayingToken,
+          isSelected: isSelectedSilence,
+        ));
+      } else {
+        // 단어 칩
+        final isSelectedWord = _selectedWordSegmentIndex == segmentIndex && 
+            _selectedWordIndex == i;
 
-          widgets.add(_buildSilenceChip(
-            context,
-            segmentIndex: segmentIndex,
-            silenceIndex: currentSilenceIndex,
-            silence: silence,
-            isPlaying: isPlayingSilence,
-            isSelected: isSelectedSilence,
-          ));
-          silenceIndex++;
-        } else {
-          break;
-        }
+        widgets.add(_buildWordChip(
+          context,
+          segmentIndex: segmentIndex,
+          segmentId: segment.id,
+          wordIndex: i,
+          word: token,
+          isPlaying: isPlayingToken,
+          isSelected: isSelectedWord,
+        ));
       }
-      
-      final isPlayingWord = currentSec >= word.startSec && currentSec < word.endSec;
-      final isSelectedWord =
-          _selectedWordSegmentIndex == segmentIndex && _selectedWordIndex == i;
+    }
+    
+    return Wrap(
+      spacing: CursorTheme.spacingXS,
+      runSpacing: CursorTheme.spacingXS,
+      children: widgets,
+    );
+  }
 
-      // 단어 칩 추가 (클릭 가능)
-      widgets.add(_buildWordChip(
-        context,
-        segmentIndex: segmentIndex,
-        segmentId: segment.id,
-        wordIndex: i,
-        word: word,
-        isPlaying: isPlayingWord,
-        isSelected: isSelectedWord,
-      ));
-      
-      // 단어 중간이나 직후의 무음 추가
-      while (silenceIndex < sortedSilences.length) {
-        final silence = sortedSilences[silenceIndex];
+  // _buildSilenceChip 시그니처를 WordSegment로 변경
+  Widget _buildSilenceChip_OLD(
+    BuildContext context, {
+    required int segmentIndex,
+    required int silenceIndex,
+    required dynamic silence, // SilenceSegment 또는 WordSegment
         
         // 무음이 이 단어와 다음 단어 사이에 있으면 추가
         final nextWordStart = (i < words.length - 1) ? words[i + 1].startSec : segment.endSec;

@@ -1125,21 +1125,13 @@ class XMLService {
   WhisperSegment _normalizeSegment(WhisperSegment segment) {
     final List<_ExportToken> tokens = [];
 
+    // words에 단어와 무음이 모두 포함되어 있음
     for (final word in segment.words) {
       tokens.add(_ExportToken(
         start: word.startSec,
         end: word.endSec,
-        word: word.word.trim(),
+        word: word.isSilence ? '' : word.word.trim(), // 무음이면 빈 문자열
         score: word.score,
-      ));
-    }
-
-    for (final silence in segment.silences) {
-      tokens.add(_ExportToken(
-        start: silence.startSec,
-        end: silence.endSec,
-        word: '',
-        score: 1.0,
       ));
     }
 
@@ -1186,7 +1178,6 @@ class XMLService {
       endSec: end,
       text: reconstructedText,
       words: timelineWords,
-      silences: segment.silences,
     );
   }
 
