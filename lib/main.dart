@@ -18,6 +18,7 @@ import 'widgets/main_content_widget.dart';
 import 'widgets/processing_screen_widget.dart';
 import 'widgets/export_menu_widget.dart';
 import 'theme/cursor_theme.dart';
+import 'models/whisper_segment.dart';
 
 
 // 내보내기 형식 enum
@@ -637,12 +638,12 @@ class _BestCutHomePageState extends State<BestCutHomePage> {
                   onStartProcessing: _startProcessing,
                 )
               : MainContentWidget(
-              appState: _appState,
-              buildContainerDecoration: _buildContainerDecoration,
-              onPickVideo: () => _videoService.pickVideo(),
-                      onRecognizeSpeech: () => _aiService.recognizeSpeech(),
-        onSummarizeScript: () => _aiService.summarizeScript(),
-                          onSegmentTap: (index) {
+                  appState: _appState,
+                  buildContainerDecoration: _buildContainerDecoration,
+                  onPickVideo: () => _videoService.pickVideo(),
+                  onRecognizeSpeech: () => _aiService.recognizeSpeech(),
+                  onSummarizeScript: () => _aiService.summarizeScript(),
+                  onSegmentTap: (index) {
               // 세그먼트 탭 로직
               if (index >= 0 && index < _appState.segments.length) {
                 final segment = _appState.segments[index];
@@ -673,6 +674,15 @@ class _BestCutHomePageState extends State<BestCutHomePage> {
                 _appState.notifyListeners();
               }
             },
+                  onWordTap: (segmentIndex, WordSegment word) {
+                    if (segmentIndex >= 0 && segmentIndex < _appState.segments.length) {
+                      final targetPosition = Duration(milliseconds: (word.startSec * 1000).round());
+                      if (kDebugMode) {
+                        print('🎯 단어 이동: segmentIndex=$segmentIndex, wordIndex=${word.index}, time=${word.startSec.toStringAsFixed(2)}s');
+                      }
+                      _videoService.seekTo(targetPosition);
+                    }
+                  },
               onSegmentSecondaryTap: (index) {
                 // 요약 세그먼트 토글 로직
                 final currentSegments = _appState.segments;
