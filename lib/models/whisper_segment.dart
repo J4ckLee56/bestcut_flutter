@@ -64,12 +64,14 @@ class AudioEnergyFrame {
 }
 
 /// Whisper 음성인식 결과를 담는 단어 모델
+/// 무음도 word=""인 WordSegment로 표현 (isSilence: true)
 class WordSegment {
   final int index; // 세그먼트 내 단어 인덱스
-  final String word;
+  final String word; // 무음인 경우 빈 문자열 ""
   final double startSec;
   final double endSec;
   final double score;
+  final bool isSilence; // 무음 여부 (word == "" 이면 true)
 
   const WordSegment({
     required this.index,
@@ -77,7 +79,14 @@ class WordSegment {
     required this.startSec,
     required this.endSec,
     required this.score,
+    this.isSilence = false, // 기본값: 일반 단어
   });
+
+  /// 일반 단어인지 확인
+  bool get isWord => !isSilence;
+  
+  /// 지속 시간
+  double get duration => endSec - startSec;
 
   factory WordSegment.fromJson(Map<String, dynamic> json) {
     return WordSegment(
@@ -86,6 +95,7 @@ class WordSegment {
       startSec: (json['startSec'] as num).toDouble(),
       endSec: (json['endSec'] as num).toDouble(),
       score: (json['score'] as num).toDouble(),
+      isSilence: json['isSilence'] as bool? ?? false,
     );
   }
 
@@ -96,7 +106,27 @@ class WordSegment {
       'startSec': startSec,
       'endSec': endSec,
       'score': score,
+      'isSilence': isSilence,
     };
+  }
+  
+  /// 복사본 생성 (편집용)
+  WordSegment copyWith({
+    int? index,
+    String? word,
+    double? startSec,
+    double? endSec,
+    double? score,
+    bool? isSilence,
+  }) {
+    return WordSegment(
+      index: index ?? this.index,
+      word: word ?? this.word,
+      startSec: startSec ?? this.startSec,
+      endSec: endSec ?? this.endSec,
+      score: score ?? this.score,
+      isSilence: isSilence ?? this.isSilence,
+    );
   }
 
   @override
@@ -107,12 +137,26 @@ class WordSegment {
         other.word == word &&
         other.startSec == startSec &&
         other.endSec == endSec &&
-        other.score == score;
+        other.score == score &&
+        other.isSilence == isSilence;
   }
 
   @override
   int get hashCode =>
-      index.hashCode ^ word.hashCode ^ startSec.hashCode ^ endSec.hashCode ^ score.hashCode;
+      index.hashCode ^ 
+      word.hashCode ^ 
+      startSec.hashCode ^ 
+      endSec.hashCode ^ 
+      score.hashCode ^
+      isSilence.hashCode;
+  
+  @override
+  String toString() {
+    if (isSilence) {
+      return 'WordSegment(SILENCE, ${startSec.toStringAsFixed(2)}s-${endSec.toStringAsFixed(2)}s, ${duration.toStringAsFixed(2)}s)';
+    }
+    return 'WordSegment("$word", ${startSec.toStringAsFixed(2)}s-${endSec.toStringAsFixed(2)}s)';
+  }
 }
 
 /// Whisper 음성인식 결과를 담는 세그먼트 모델
@@ -123,8 +167,7 @@ class WhisperSegment {
   String text; // 편집 가능하도록 final 제거
   final double confidence;
   bool? isSummary; // 요약 세그먼트 여부
-  final List<WordSegment> words;
-  final List<SilenceSegment> silences; // 세그먼트 내 무음 구간
+  final List<WordSegment> words; // 단어 + 무음 통합 (isSilence로 구분)
 
   WhisperSegment({
     required this.id,
@@ -134,7 +177,6 @@ class WhisperSegment {
     this.confidence = 1.0,
     this.isSummary,
     this.words = const [],
-    this.silences = const [],
   });
 
   /// SRT 파일에서 WhisperSegment 생성
@@ -229,12 +271,42 @@ class WhisperSegment {
       'confidence': confidence,
       'isSummary': isSummary,
       'words': words.map((w) => w.toJson()).toList(),
-      'silences': silences.map((s) => s.toJson()).toList(),
     };
   }
 
-  /// JSON에서 생성
+  /// JSON에서 생성 (구 silences 형식 마이그레이션 지원)
   factory WhisperSegment.fromJson(Map<String, dynamic> json) {
+    final wordsList = (json['words'] as List<dynamic>? ?? const [])
+        .map((item) => WordSegment.fromJson(item as Map<String, dynamic>))
+        .toList();
+    
+    // 구 버전 호환성: silences가 있으면 words로 통합
+    if (json.containsKey('silences') && json['silences'] != null) {
+      final silencesList = (json['silences'] as List<dynamic>)
+          .map((item) => SilenceSegment.fromJson(item as Map<String, dynamic>))
+          .toList();
+      
+      // silences를 WordSegment로 변환하여 추가
+      for (final silence in silencesList) {
+        wordsList.add(WordSegment(
+          index: wordsList.length,
+          word: '',
+          startSec: silence.startSec,
+          endSec: silence.endSec,
+          score: 1.0,
+          isSilence: true,
+        ));
+      }
+      
+      // 시간순 정렬
+      wordsList.sort((a, b) => a.startSec.compareTo(b.startSec));
+      
+      // 인덱스 재조정
+      for (int i = 0; i < wordsList.length; i++) {
+        wordsList[i] = wordsList[i].copyWith(index: i);
+      }
+    }
+    
     return WhisperSegment(
       id: json['id'] as int,
       startSec: (json['startSec'] as num).toDouble(),
@@ -242,12 +314,7 @@ class WhisperSegment {
       text: json['text'] as String,
       confidence: (json['confidence'] as num?)?.toDouble() ?? 1.0,
       isSummary: json['isSummary'] as bool?,
-      words: (json['words'] as List<dynamic>? ?? const [])
-          .map((item) => WordSegment.fromJson(item as Map<String, dynamic>))
-          .toList(),
-      silences: (json['silences'] as List<dynamic>? ?? const [])
-          .map((item) => SilenceSegment.fromJson(item as Map<String, dynamic>))
-          .toList(),
+      words: wordsList,
     );
   }
 
@@ -260,7 +327,6 @@ class WhisperSegment {
     double? confidence,
     bool? isSummary,
     List<WordSegment>? words,
-    List<SilenceSegment>? silences,
   }) {
     return WhisperSegment(
       id: id ?? this.id,
@@ -270,7 +336,6 @@ class WhisperSegment {
       confidence: confidence ?? this.confidence,
       isSummary: isSummary ?? this.isSummary,
       words: words ?? this.words,
-      silences: silences ?? this.silences,
     );
   }
 
