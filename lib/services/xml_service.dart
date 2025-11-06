@@ -1123,37 +1123,70 @@ class XMLService {
   }
 
   WhisperSegment _normalizeSegment(WhisperSegment segment) {
-    final filteredWords = segment.words
-        .where((w) => w.word.trim().isNotEmpty)
-        .toList();
+    final List<_ExportToken> tokens = [];
 
-    double start = segment.startSec;
-    double end = segment.endSec;
-    List<WordSegment> words = filteredWords;
-
-    if (filteredWords.isNotEmpty) {
-      start = filteredWords.first.startSec;
-      end = filteredWords.last.endSec;
-      words = filteredWords
-          .map((w) => WordSegment(
-                index: w.index,
-                word: w.word.trim(),
-                startSec: w.startSec,
-                endSec: w.endSec,
-                score: w.score,
-              ))
-          .toList();
+    for (final word in segment.words) {
+      tokens.add(_ExportToken(
+        start: word.startSec,
+        end: word.endSec,
+        word: word.word.trim(),
+        score: word.score,
+      ));
     }
 
-    final reconstructedText = words.isNotEmpty
-        ? _reconstructTextFromWords(words)
+    for (final silence in segment.silences) {
+      tokens.add(_ExportToken(
+        start: silence.startSec,
+        end: silence.endSec,
+        word: '',
+        score: 1.0,
+      ));
+    }
+
+    tokens.removeWhere((token) => token.end <= token.start);
+
+    tokens.sort((a, b) {
+      final startCompare = a.start.compareTo(b.start);
+      if (startCompare != 0) return startCompare;
+      return a.end.compareTo(b.end);
+    });
+
+    final List<WordSegment> timelineWords = [];
+    final List<WordSegment> spokenWords = [];
+
+    for (int i = 0; i < tokens.length; i++) {
+      final token = tokens[i];
+      final normalizedWord = WordSegment(
+        index: i,
+        word: token.word,
+        startSec: token.start,
+        endSec: token.end,
+        score: token.score,
+      );
+      timelineWords.add(normalizedWord);
+
+      if (token.word.isNotEmpty) {
+        spokenWords.add(normalizedWord);
+      }
+    }
+
+    final double start = timelineWords.isNotEmpty
+        ? timelineWords.first.startSec
+        : segment.startSec;
+    final double end = timelineWords.isNotEmpty
+        ? timelineWords.last.endSec
+        : segment.endSec;
+
+    final reconstructedText = spokenWords.isNotEmpty
+        ? _reconstructTextFromWords(spokenWords)
         : _normalizeWhitespace(segment.text);
 
     return segment.copyWith(
       startSec: start,
       endSec: end,
       text: reconstructedText,
-      words: words,
+      words: timelineWords,
+      silences: segment.silences,
     );
   }
 
@@ -1199,4 +1232,18 @@ class XMLService {
   String _normalizeWhitespace(String text) {
     return text.replaceAll(RegExp(r'\s+'), ' ').trim();
   }
+}
+
+class _ExportToken {
+  final double start;
+  final double end;
+  final String word;
+  final double score;
+
+  const _ExportToken({
+    required this.start,
+    required this.end,
+    required this.word,
+    required this.score,
+  });
 }

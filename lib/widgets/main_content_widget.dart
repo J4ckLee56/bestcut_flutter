@@ -24,6 +24,7 @@ class MainContentWidget extends StatefulWidget {
   final void Function(int) onSegmentSecondaryTap;
   final void Function(int) onSegmentDoubleTap;
   final void Function(int, WordSegment)? onWordTap;
+  final void Function(int, SilenceSegment)? onSilenceTap;
   final void Function(int, String) onFinishEditing;
   final VoidCallback? onExportXML;
   final VoidCallback? onExportFCPXML;
@@ -46,6 +47,7 @@ class MainContentWidget extends StatefulWidget {
     required this.onSegmentSecondaryTap,
     required this.onSegmentDoubleTap,
     this.onWordTap,
+    this.onSilenceTap,
     required this.onFinishEditing,
     this.onExportXML,
     this.onExportFCPXML,
@@ -203,6 +205,7 @@ class _MainContentWidgetState extends State<MainContentWidget> {
                                     onSegmentSecondaryTap: widget.onSegmentSecondaryTap,
                                     onSegmentDoubleTap: widget.onSegmentDoubleTap,
                                     onWordTap: widget.onWordTap,
+                                    onSilenceTap: widget.onSilenceTap,
                                     onFinishEditing: widget.onFinishEditing,
                                     previewWidth: segmentConstraints.maxWidth,
                                   );

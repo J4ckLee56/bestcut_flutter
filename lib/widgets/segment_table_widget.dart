@@ -19,6 +19,7 @@ class SegmentTableWidget extends StatefulWidget {
   final void Function(int) onSegmentSecondaryTap;
   final void Function(int) onSegmentDoubleTap;
   final void Function(int, WordSegment)? onWordTap;
+  final void Function(int, SilenceSegment)? onSilenceTap;
   final void Function(int, String) onFinishEditing;
   final double previewWidth;
 
@@ -30,6 +31,7 @@ class SegmentTableWidget extends StatefulWidget {
     required this.onSegmentSecondaryTap,
     required this.onSegmentDoubleTap,
     this.onWordTap,
+    this.onSilenceTap,
     required this.onFinishEditing,
     required this.previewWidth,
   });
@@ -44,6 +46,8 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
   final ScrollController _scrollController = ScrollController();
   int? _selectedWordSegmentIndex;
   int? _selectedWordIndex;
+  int? _selectedSilenceSegmentIndex;
+  int? _selectedSilenceIndex;
 
   @override
   void initState() {
@@ -56,11 +60,21 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
   void didUpdateWidget(covariant SegmentTableWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
     final currentSegmentIndex = widget.appState.currentSegmentIndex;
-    if (_selectedWordSegmentIndex != null &&
-        currentSegmentIndex != _selectedWordSegmentIndex) {
+    final bool shouldResetWord = _selectedWordSegmentIndex != null &&
+        currentSegmentIndex != _selectedWordSegmentIndex;
+    final bool shouldResetSilence = _selectedSilenceSegmentIndex != null &&
+        currentSegmentIndex != _selectedSilenceSegmentIndex;
+
+    if (shouldResetWord || shouldResetSilence) {
       setState(() {
-        _selectedWordSegmentIndex = null;
-        _selectedWordIndex = null;
+        if (shouldResetWord) {
+          _selectedWordSegmentIndex = null;
+          _selectedWordIndex = null;
+        }
+        if (shouldResetSilence) {
+          _selectedSilenceSegmentIndex = null;
+          _selectedSilenceIndex = null;
+        }
       });
     }
   }
@@ -94,6 +108,24 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     setState(() {
       _selectedWordSegmentIndex = segmentIndex;
       _selectedWordIndex = wordIndex;
+      _selectedSilenceSegmentIndex = null;
+      _selectedSilenceIndex = null;
+    });
+  }
+
+  void _handleSilenceTap(int segmentIndex, int silenceIndex, SilenceSegment silence) {
+    if (kDebugMode) {
+      print('🖱️ 무음 선택됨 (index=$segmentIndex, silenceIndex=$silenceIndex, range=${silence.startSec.toStringAsFixed(2)}-${silence.endSec.toStringAsFixed(2)}s)');
+    }
+
+    widget.onSegmentTap(segmentIndex);
+    widget.onSilenceTap?.call(segmentIndex, silence);
+
+    setState(() {
+      _selectedWordSegmentIndex = null;
+      _selectedWordIndex = null;
+      _selectedSilenceSegmentIndex = segmentIndex;
+      _selectedSilenceIndex = silenceIndex;
     });
   }
 
@@ -263,10 +295,15 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
       behavior: HitTestBehavior.deferToChild,  // 자식(단어) 클릭을 우선
       onTap: () {
         widget.onSegmentTap(index);
-        if (_selectedWordSegmentIndex != null || _selectedWordIndex != null) {
+        if (_selectedWordSegmentIndex != null ||
+            _selectedWordIndex != null ||
+            _selectedSilenceSegmentIndex != null ||
+            _selectedSilenceIndex != null) {
           setState(() {
             _selectedWordSegmentIndex = null;
             _selectedWordIndex = null;
+            _selectedSilenceSegmentIndex = null;
+            _selectedSilenceIndex = null;
           });
         }
       },
@@ -472,7 +509,19 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
         
         // 무음이 현재 단어보다 앞에 있으면 추가
         if (silence.endSec <= word.startSec) {
-          widgets.add(_buildSilenceChip(context, silence));
+          final currentSilenceIndex = silenceIndex;
+          final isPlayingSilence = currentSec >= silence.startSec && currentSec < silence.endSec;
+          final isSelectedSilence = _selectedSilenceSegmentIndex == segmentIndex &&
+              _selectedSilenceIndex == currentSilenceIndex;
+
+          widgets.add(_buildSilenceChip(
+            context,
+            segmentIndex: segmentIndex,
+            silenceIndex: currentSilenceIndex,
+            silence: silence,
+            isPlaying: isPlayingSilence,
+            isSelected: isSelectedSilence,
+          ));
           silenceIndex++;
         } else {
           break;
@@ -502,7 +551,19 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
         final nextWordStart = (i < words.length - 1) ? words[i + 1].startSec : segment.endSec;
         
         if (silence.startSec >= word.endSec && silence.startSec < nextWordStart) {
-          widgets.add(_buildSilenceChip(context, silence));
+          final currentSilenceIndex = silenceIndex;
+          final isPlayingSilence = currentSec >= silence.startSec && currentSec < silence.endSec;
+          final isSelectedSilence = _selectedSilenceSegmentIndex == segmentIndex &&
+              _selectedSilenceIndex == currentSilenceIndex;
+
+          widgets.add(_buildSilenceChip(
+            context,
+            segmentIndex: segmentIndex,
+            silenceIndex: currentSilenceIndex,
+            silence: silence,
+            isPlaying: isPlayingSilence,
+            isSelected: isSelectedSilence,
+          ));
           silenceIndex++;
         } else if (silence.startSec >= nextWordStart) {
           // 다음 단어 영역이므로 나중에 처리
@@ -516,7 +577,20 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     
     // 마지막 단어 이후의 남은 무음 추가
     while (silenceIndex < sortedSilences.length) {
-      widgets.add(_buildSilenceChip(context, sortedSilences[silenceIndex]));
+      final currentSilenceIndex = silenceIndex;
+      final silence = sortedSilences[currentSilenceIndex];
+      final isPlayingSilence = currentSec >= silence.startSec && currentSec < silence.endSec;
+      final isSelectedSilence = _selectedSilenceSegmentIndex == segmentIndex &&
+          _selectedSilenceIndex == currentSilenceIndex;
+
+      widgets.add(_buildSilenceChip(
+        context,
+        segmentIndex: segmentIndex,
+        silenceIndex: currentSilenceIndex,
+        silence: silence,
+        isPlaying: isPlayingSilence,
+        isSelected: isSelectedSilence,
+      ));
       silenceIndex++;
     }
 
@@ -586,26 +660,75 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
   }
 
   // 무음 칩 표시 (단어 사이)
-  Widget _buildSilenceChip(BuildContext context, SilenceSegment silence) {
+  Widget _buildSilenceChip(
+    BuildContext context, {
+    required int segmentIndex,
+    required int silenceIndex,
+    required SilenceSegment silence,
+    required bool isPlaying,
+    required bool isSelected,
+  }) {
+    final bool isActive = isPlaying || isSelected;
+
+    final Color backgroundColor = isSelected
+        ? CursorTheme.warning.withOpacity(0.35)
+        : isPlaying
+            ? CursorTheme.warning.withOpacity(0.22)
+            : CursorTheme.warning.withOpacity(0.12);
+
+    final Color borderColor = isSelected
+        ? CursorTheme.warning
+        : CursorTheme.warning.withOpacity(isPlaying ? 0.6 : 0.3);
+
+    final double borderWidth = isSelected ? 2.0 : 1.0;
+
+    final Color labelColor = isActive
+        ? CursorTheme.warning
+        : CursorTheme.warning.withOpacity(0.85);
+
+    final TextStyle labelStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: labelColor,
+          fontWeight: isSelected
+              ? FontWeight.w700
+              : isPlaying
+                  ? FontWeight.w600
+                  : FontWeight.w500,
+          fontSize: 10,
+        ) ??
+        TextStyle(
+          color: labelColor,
+          fontWeight: FontWeight.w600,
+          fontSize: 10,
+        );
+
     return Tooltip(
-      message: '무음 ${silence.duration.toStringAsFixed(2)}초',
-      child: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: CursorTheme.spacingXS,
-          vertical: 4,
-        ),
-        decoration: CursorTheme.containerDecoration(
-          backgroundColor: CursorTheme.warning.withOpacity(0.1),
-          borderColor: CursorTheme.warning.withOpacity(0.3),
-          borderRadius: CursorTheme.radiusSmall,
-        ),
-        child: Text(
-          '[...]',
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: CursorTheme.warning,
-                fontWeight: FontWeight.w600,
-                fontSize: 10,
+      message:
+          '무음 ${silence.duration.toStringAsFixed(2)}초 (${_formatTimeFromSeconds(silence.startSec)} ~ ${_formatTimeFromSeconds(silence.endSec)})',
+      child: GestureDetector(
+        onTap: () => _handleSilenceTap(segmentIndex, silenceIndex, silence),
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: CursorTheme.spacingXS,
+            vertical: 4,
+          ),
+          decoration: BoxDecoration(
+            color: backgroundColor,
+            borderRadius: BorderRadius.circular(CursorTheme.radiusSmall),
+            border: Border.all(color: borderColor, width: borderWidth),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.volume_mute_rounded,
+                color: labelStyle.color,
+                size: 12,
               ),
+              const SizedBox(width: 4),
+              Text('무음', style: labelStyle),
+            ],
+          ),
         ),
       ),
     );
