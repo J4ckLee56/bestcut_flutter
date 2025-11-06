@@ -1569,30 +1569,45 @@ ${chunkOverviews.map((overview) => '''
 
       if (prevRef != null) {
         final prevWord = wordsPerSegment[prevRef.segmentIndex][prevRef.wordIndex];
-        final double minAllowedEnd = prevWord.startSec + _kMinimumWordDuration;
+        
+        // 에너지 조정된 타이밍을 최대한 존중하되, 무음 구간과 충돌 시만 조정
         double desiredEnd = _roundToCentisecond(finalSilenceStart);
-        if (desiredEnd < minAllowedEnd) {
-          desiredEnd = _roundToCentisecond(minAllowedEnd);
-        }
-        if (desiredEnd > finalSilenceEnd - _kGapTolerance) {
-          desiredEnd = _roundToCentisecond(math.max(finalSilenceStart, finalSilenceEnd - _kGapTolerance));
-        }
-        if (desiredEnd > prevWord.endSec + _kGapTolerance) {
-          desiredEnd = _roundToCentisecond(desiredEnd);
-        }
+        
+        // 에너지 조정 타이밍이 무음 시작보다 앞에 있으면 그대로 유지
+        if (prevWord.endSec <= desiredEnd + 0.05) {
+          // 에너지 조정 결과를 존중 (±0.05초 이내면 유지)
+          desiredEnd = prevWord.endSec;
+          finalSilenceStart = desiredEnd;
+          
+          if (kDebugMode) {
+            print('   ✓ FFmpeg 무음: 이전 단어 "${prevWord.word}" 종료 유지 ${prevWord.endSec.toStringAsFixed(2)}s (에너지 조정 존중)');
+          }
+        } else {
+          // 충돌: 무음 시작으로 조정 필요
+          final double minAllowedEnd = prevWord.startSec + _kMinimumWordDuration;
+          if (desiredEnd < minAllowedEnd) {
+            desiredEnd = _roundToCentisecond(minAllowedEnd);
+          }
+          if (desiredEnd > finalSilenceEnd - _kGapTolerance) {
+            desiredEnd = _roundToCentisecond(math.max(finalSilenceStart, finalSilenceEnd - _kGapTolerance));
+          }
+          if (desiredEnd > prevWord.endSec + _kGapTolerance) {
+            desiredEnd = _roundToCentisecond(desiredEnd);
+          }
 
-        final updatedPrev = WordSegment(
-          index: prevWord.index,
-          word: prevWord.word,
-          startSec: prevWord.startSec,
-          endSec: desiredEnd,
-          score: prevWord.score,
-        );
-        wordsPerSegment[prevRef.segmentIndex][prevRef.wordIndex] = updatedPrev;
-        finalSilenceStart = desiredEnd;
+          final updatedPrev = WordSegment(
+            index: prevWord.index,
+            word: prevWord.word,
+            startSec: prevWord.startSec,
+            endSec: desiredEnd,
+            score: prevWord.score,
+          );
+          wordsPerSegment[prevRef.segmentIndex][prevRef.wordIndex] = updatedPrev;
+          finalSilenceStart = desiredEnd;
 
-        if (kDebugMode) {
-          print('   ↔ FFmpeg 무음 적용: 이전 단어 "${prevWord.word}" 종료 ${prevWord.endSec.toStringAsFixed(2)}s → ${desiredEnd.toStringAsFixed(2)}s');
+          if (kDebugMode) {
+            print('   ↔ FFmpeg 무음 적용: 이전 단어 "${prevWord.word}" 종료 ${prevWord.endSec.toStringAsFixed(2)}s → ${desiredEnd.toStringAsFixed(2)}s');
+          }
         }
       } else {
         finalSilenceStart = _roundToCentisecond(finalSilenceStart);
@@ -1600,33 +1615,48 @@ ${chunkOverviews.map((overview) => '''
 
       if (nextRef != null) {
         final nextWord = wordsPerSegment[nextRef.segmentIndex][nextRef.wordIndex];
-        final double maxAllowedStart = nextWord.endSec - _kMinimumWordDuration;
+        
+        // 에너지 조정된 타이밍을 최대한 존중하되, 무음 구간과 충돌 시만 조정
         double desiredStart = _roundToCentisecond(finalSilenceEnd);
-        if (desiredStart < finalSilenceStart) {
-          desiredStart = finalSilenceStart;
-        }
-        if (desiredStart > maxAllowedStart) {
-          desiredStart = _roundToCentisecond(maxAllowedStart);
-        }
-        if (nextWord.endSec - desiredStart < _kMinimumWordDuration) {
-          desiredStart = _roundToCentisecond(nextWord.endSec - _kMinimumWordDuration);
-        }
-        if (desiredStart < finalSilenceStart) {
-          desiredStart = finalSilenceStart;
-        }
+        
+        // 에너지 조정 타이밍이 무음 끝보다 뒤에 있으면 그대로 유지
+        if (nextWord.startSec >= desiredStart - 0.05) {
+          // 에너지 조정 결과를 존중 (±0.05초 이내면 유지)
+          desiredStart = nextWord.startSec;
+          finalSilenceEnd = desiredStart;
+          
+          if (kDebugMode) {
+            print('   ✓ FFmpeg 무음: 다음 단어 "${nextWord.word}" 시작 유지 ${nextWord.startSec.toStringAsFixed(2)}s (에너지 조정 존중)');
+          }
+        } else {
+          // 충돌: 무음 끝으로 조정 필요
+          final double maxAllowedStart = nextWord.endSec - _kMinimumWordDuration;
+          if (desiredStart < finalSilenceStart) {
+            desiredStart = finalSilenceStart;
+          }
+          if (desiredStart > maxAllowedStart) {
+            desiredStart = _roundToCentisecond(maxAllowedStart);
+          }
+          if (nextWord.endSec - desiredStart < _kMinimumWordDuration) {
+            desiredStart = _roundToCentisecond(nextWord.endSec - _kMinimumWordDuration);
+          }
+          if (desiredStart < finalSilenceStart) {
+            desiredStart = finalSilenceStart;
+          }
 
-        final updatedNext = WordSegment(
-          index: nextWord.index,
-          word: nextWord.word,
-          startSec: desiredStart,
-          endSec: nextWord.endSec,
-          score: nextWord.score,
-        );
-        wordsPerSegment[nextRef.segmentIndex][nextRef.wordIndex] = updatedNext;
-        finalSilenceEnd = desiredStart;
+          final updatedNext = WordSegment(
+            index: nextWord.index,
+            word: nextWord.word,
+            startSec: desiredStart,
+            endSec: nextWord.endSec,
+            score: nextWord.score,
+          );
+          wordsPerSegment[nextRef.segmentIndex][nextRef.wordIndex] = updatedNext;
+          finalSilenceEnd = desiredStart;
 
-        if (kDebugMode) {
-          print('   ↔ FFmpeg 무음 적용: 다음 단어 "${nextWord.word}" 시작 ${nextWord.startSec.toStringAsFixed(2)}s → ${desiredStart.toStringAsFixed(2)}s');
+          if (kDebugMode) {
+            print('   ↔ FFmpeg 무음 적용: 다음 단어 "${nextWord.word}" 시작 ${nextWord.startSec.toStringAsFixed(2)}s → ${desiredStart.toStringAsFixed(2)}s');
+          }
         }
       } else {
         finalSilenceEnd = _roundToCentisecond(finalSilenceEnd);
