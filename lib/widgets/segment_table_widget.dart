@@ -228,7 +228,7 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     
     return GestureDetector(
       key: widget.appState.segmentKeys[index],
-      behavior: HitTestBehavior.deferToChild,  // 자식(단어) 클릭을 우선
+      behavior: HitTestBehavior.translucent,  // 자식 클릭 허용, 빈 영역만 부모 클릭
       onTap: () => widget.onSegmentTap(index),
       onSecondaryTap: () => _toggleSummarySegment(index),
       onDoubleTap: () => _startEditing(index),
@@ -486,10 +486,13 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
         : CursorTheme.backgroundSecondary;
     final borderColor = isHighlighted ? CursorTheme.cursorBlue : CursorTheme.borderSecondary;
 
-    return GestureDetector(
-      onTap: () => widget.onSegmentTap(segmentIndex),  // 세그먼트 클릭과 동일하게 동작
-      child: Tooltip(
-        message: '${_formatTimeFromSeconds(word.startSec)} ~ ${_formatTimeFromSeconds(word.endSec)}',
+    return Tooltip(
+      message: '${_formatTimeFromSeconds(word.startSec)} ~ ${_formatTimeFromSeconds(word.endSec)}',
+      child: InkWell(
+        onTap: () {
+          widget.onSegmentTap(segmentIndex);  // 세그먼트 클릭과 동일하게 동작
+        },
+        borderRadius: BorderRadius.circular(CursorTheme.radiusSmall),
         child: Container(
           padding: const EdgeInsets.symmetric(
             horizontal: CursorTheme.spacingXS,
