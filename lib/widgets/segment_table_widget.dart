@@ -441,10 +441,12 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
                 ],
               ),
             ),
-        ],
+          ],
+        ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   // 개선된 세그먼트 아이템 빌더
   Widget _buildSegmentItem(BuildContext context, int index, bool isSelected, bool isUnifiedSummary) {
