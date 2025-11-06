@@ -40,12 +40,27 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
   int? _editingIndex;
   final TextEditingController _editController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  int? _selectedWordSegmentIndex;
+  int? _selectedWordIndex;
 
   @override
   void initState() {
     super.initState();
     // AppState 변경 감지를 위한 리스너 추가
     widget.appState.addListener(_onAppStateChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant SegmentTableWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final currentSegmentIndex = widget.appState.currentSegmentIndex;
+    if (_selectedWordSegmentIndex != null &&
+        currentSegmentIndex != _selectedWordSegmentIndex) {
+      setState(() {
+        _selectedWordSegmentIndex = null;
+        _selectedWordIndex = null;
+      });
+    }
   }
 
   @override
@@ -64,6 +79,19 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
         _scrollToPlayingSegment();
       });
     }
+  }
+
+  void _handleWordTap(int segmentIndex, int segmentId, int wordIndex, WordSegment word) {
+    if (kDebugMode) {
+      print('🖱️ 단어 "${word.word}" 선택됨 (index=$segmentIndex, id=$segmentId, wordIndex=$wordIndex)');
+    }
+
+    widget.onSegmentTap(segmentIndex);
+
+    setState(() {
+      _selectedWordSegmentIndex = segmentIndex;
+      _selectedWordIndex = wordIndex;
+    });
   }
 
   @override
@@ -230,7 +258,15 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     return GestureDetector(
       key: widget.appState.segmentKeys[index],
       behavior: HitTestBehavior.deferToChild,  // 자식(단어) 클릭을 우선
-      onTap: () => widget.onSegmentTap(index),
+      onTap: () {
+        widget.onSegmentTap(index);
+        if (_selectedWordSegmentIndex != null || _selectedWordIndex != null) {
+          setState(() {
+            _selectedWordSegmentIndex = null;
+            _selectedWordIndex = null;
+          });
+        }
+      },
       onSecondaryTap: () => _toggleSummarySegment(index),
       onDoubleTap: () => _startEditing(index),
       child: Container(
@@ -440,13 +476,19 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
         }
       }
       
+      final isPlayingWord = currentSec >= word.startSec && currentSec < word.endSec;
+      final isSelectedWord =
+          _selectedWordSegmentIndex == segmentIndex && _selectedWordIndex == i;
+
       // 단어 칩 추가 (클릭 가능)
       widgets.add(_buildWordChip(
         context,
-        segmentIndex,  // 세그먼트 인덱스 전달
-        segment.id,  // 실제 세그먼트 ID도 전달
-        word,
-        isHighlighted: currentSec >= word.startSec && currentSec < word.endSec,
+        segmentIndex: segmentIndex,
+        segmentId: segment.id,
+        wordIndex: i,
+        word: word,
+        isPlaying: isPlayingWord,
+        isSelected: isSelectedWord,
       ));
       
       // 단어 중간이나 직후의 무음 추가
@@ -482,35 +524,57 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     );
   }
 
-  Widget _buildWordChip(BuildContext context, int segmentIndex, int segmentId, WordSegment word, {required bool isHighlighted}) {
-    final background = isHighlighted
-        ? CursorTheme.cursorBlue.withOpacity(0.2)
-        : CursorTheme.backgroundSecondary;
-    final borderColor = isHighlighted ? CursorTheme.cursorBlue : CursorTheme.borderSecondary;
+  Widget _buildWordChip(
+    BuildContext context, {
+    required int segmentIndex,
+    required int segmentId,
+    required int wordIndex,
+    required WordSegment word,
+    required bool isPlaying,
+    required bool isSelected,
+  }) {
+    final bool isActive = isPlaying || isSelected;
+
+    final Color backgroundColor = isSelected
+        ? CursorTheme.cursorBlue.withOpacity(0.28)
+        : isPlaying
+            ? CursorTheme.cursorBlue.withOpacity(0.16)
+            : CursorTheme.backgroundSecondary;
+
+    final Color borderColor = isSelected
+        ? CursorTheme.cursorBlue
+        : isPlaying
+            ? CursorTheme.cursorBlue.withOpacity(0.6)
+            : CursorTheme.borderSecondary;
+
+    final double borderWidth = isSelected ? 2.0 : 1.0;
+    final Color textColor = isActive ? CursorTheme.cursorBlue : CursorTheme.textPrimary;
+    final FontWeight fontWeight = isSelected
+        ? FontWeight.w700
+        : isPlaying
+            ? FontWeight.w600
+            : FontWeight.w500;
 
     return Tooltip(
       message: '${_formatTimeFromSeconds(word.startSec)} ~ ${_formatTimeFromSeconds(word.endSec)}',
       child: GestureDetector(
-        onTap: () {
-          if (kDebugMode) print('🖱️ 단어 "${word.word}" 클릭됨 (인덱스 $segmentIndex, ID $segmentId)');
-          widget.onSegmentTap(segmentIndex);  // 세그먼트 클릭과 동일하게 동작
-        },
-        behavior: HitTestBehavior.opaque,  // 클릭 영역을 명확히 지정하고 부모 제스처 차단
+        onTap: () => _handleWordTap(segmentIndex, segmentId, wordIndex, word),
+        behavior: HitTestBehavior.opaque,
         child: Container(
           padding: const EdgeInsets.symmetric(
             horizontal: CursorTheme.spacingXS,
             vertical: 4,
           ),
-          decoration: CursorTheme.containerDecoration(
-            backgroundColor: background,
-            borderColor: borderColor,
-            borderRadius: CursorTheme.radiusSmall,
+          decoration: BoxDecoration(
+            color: backgroundColor,
+            borderRadius: BorderRadius.circular(CursorTheme.radiusSmall),
+            border: Border.all(color: borderColor, width: borderWidth),
           ),
           child: Text(
             word.word,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: isHighlighted ? CursorTheme.cursorBlue : CursorTheme.textPrimary,
-                  fontWeight: isHighlighted ? FontWeight.w600 : FontWeight.w500,
+                  color: textColor,
+                  fontWeight: fontWeight,
                 ),
           ),
         ),
