@@ -641,14 +641,10 @@ class AIService {
 
       print('whisper.cpp 성공: ${enrichedSegments.length}개 세그먼트 (단어 포함=${enrichedSegments.isNotEmpty && enrichedSegments.first.words.isNotEmpty})');
       
-      // 1단계: 에너지 프로파일로 단어 경계 미세 조정
-      print('=== 에너지 기반 단어 경계 미세 조정 시작 ===');
-      final energyRefinedSegments = _refineWordBoundariesWithEnergy(enrichedSegments, energyProfile);
-      print('에너지 기반 단어 경계 조정 완료');
-      
-      // 2단계: 무음 기반 세그먼트 경계 조정
+      // WhisperX 결과를 신뢰 (에너지 조정 비활성화 - 단어 겹침 문제)
+      // 무음 기반 세그먼트 경계만 조정
       print('=== 무음 기반 세그먼트 경계 조정 시작 ===');
-      final segmentsWithSilence = _integrateSilenceIntoSegments(energyRefinedSegments, silences);
+      final segmentsWithSilence = _integrateSilenceIntoSegments(enrichedSegments, silences);
       print('무음 기반 세그먼트 경계 조정 완료');
       
       return segmentsWithSilence;
