@@ -2311,7 +2311,7 @@ ${jsonEncode(formatted)}
         scriptPath,
         '--audio', audioPath,
         '--output-json', energyJsonPath,
-        '--frame-length', '0.1',
+        '--frame-length', '0.01',  // 10ms 고해상도 프레임
         '--silence-threshold', '-40.0',
       ],
       environment: env,
