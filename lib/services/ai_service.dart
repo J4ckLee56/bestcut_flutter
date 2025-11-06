@@ -3331,11 +3331,25 @@ ${jsonEncode(formatted)}
     final firstWords = segment.words.sublist(0, splitWordIndex + 1);
     final secondWords = segment.words.sublist(splitWordIndex + 1);
     
-    final splitTime = firstWords.last.endSec;
+    final lastWordEnd = firstWords.last.endSec;
     
-    // 무음도 분할
-    final firstSilences = segment.silences.where((s) => s.endSec <= splitTime + 0.1).toList();
-    final secondSilences = segment.silences.where((s) => s.startSec >= splitTime - 0.1).toList();
+    // 분할점 직후의 무음 찾기 (이 무음이 첫 번째 세그먼트의 끝이 됨)
+    SilenceSegment? trailingSilence;
+    for (final silence in segment.silences) {
+      if (silence.startSec >= lastWordEnd - 0.05 && 
+          silence.startSec <= lastWordEnd + 0.05 &&
+          silence.duration >= 0.3) {
+        trailingSilence = silence;
+        break;
+      }
+    }
+    
+    // 첫 번째 세그먼트의 실제 끝 시간 (무음 포함)
+    final firstSegmentEnd = trailingSilence?.endSec ?? lastWordEnd;
+    
+    // 무음 분할: 첫 번째 세그먼트 끝 시간 기준
+    final firstSilences = segment.silences.where((s) => s.endSec <= firstSegmentEnd + 0.05).toList();
+    final secondSilences = segment.silences.where((s) => s.startSec >= firstSegmentEnd - 0.05).toList();
     
     // 텍스트 분할
     final firstText = firstWords.map((w) => w.word).join(' ');
@@ -3344,7 +3358,7 @@ ${jsonEncode(formatted)}
     final firstSegment = WhisperSegment(
       id: segment.id,
       startSec: segment.startSec,
-      endSec: firstWords.last.endSec,
+      endSec: firstSegmentEnd, // 무음 포함된 끝 시간
       text: firstText,
       confidence: segment.confidence,
       words: firstWords,
