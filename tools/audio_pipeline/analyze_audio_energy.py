@@ -15,7 +15,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Analyze audio energy profile")
     parser.add_argument("--audio", required=True, help="Path to WAV audio file")
     parser.add_argument("--output-json", required=True, help="Path to write energy profile JSON")
-    parser.add_argument("--frame-length", type=float, default=0.01, help="Frame length in seconds (default: 0.01 - high precision)")
+    parser.add_argument("--frame-length", type=float, default=0.1, help="Frame length in seconds (default: 0.1)")
     parser.add_argument("--silence-threshold", type=float, default=-40.0, help="Silence threshold in dB (default: -40)")
     return parser.parse_args()
 

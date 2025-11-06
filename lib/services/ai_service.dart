@@ -2311,7 +2311,7 @@ ${jsonEncode(formatted)}
         scriptPath,
         '--audio', audioPath,
         '--output-json', energyJsonPath,
-        '--frame-length', '0.01',  // 10ms 고해상도 프레임
+        '--frame-length', '0.1',  // 100ms 프레임
         '--silence-threshold', '-40.0',
       ],
       environment: env,
@@ -2416,9 +2416,9 @@ ${jsonEncode(formatted)}
     List<AudioEnergyFrame> energyProfile,
     double? previousWordEnd,  // 이전 단어 끝 시간
   ) {
-    // 확장된 탐색 범위: 고해상도 에너지 프로파일(0.01s)에 맞춰 더 넓게 탐색
-    const double searchBefore = 0.15;  // 앞으로 150ms
-    const double searchAfter = 0.25;   // 뒤로 250ms
+    // 적극적 탐색: 더 넓은 범위 탐색
+    const double searchBefore = 0.1;  // 앞으로 100ms
+    const double searchAfter = 0.2;   // 뒤로 200ms
     const double voiceThreshold = -40.0; // -40dB 이상은 음성
 
     // 이전 단어와 겹치지 않도록 최소 시작 시간 설정
@@ -2449,9 +2449,9 @@ ${jsonEncode(formatted)}
     List<AudioEnergyFrame> energyProfile,
     double? nextWordStart,  // 다음 단어 시작 시간
   ) {
-    // 확장된 탐색 범위: 고해상도 에너지 프로파일(0.01s)에 맞춰 더 넓게 탐색
-    const double searchBefore = 0.25;  // 앞으로 250ms
-    const double searchAfter = 0.15;   // 뒤로 150ms
+    // 적극적 탐색: 더 넓은 범위 탐색
+    const double searchBefore = 0.2;  // 앞으로 200ms
+    const double searchAfter = 0.1;   // 뒤로 100ms
     const double voiceThreshold = -40.0; // -40dB 이상은 음성
 
     // 다음 단어와 겹치지 않도록 최대 끝 시간 설정
