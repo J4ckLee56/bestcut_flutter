@@ -2181,8 +2181,9 @@ ${jsonEncode(formatted)}
         final approximateStart = word.startSec;
         final approximateEnd = word.endSec;
 
-        // 이전/다음 단어 정보
-        final previousWordEnd = i > 0 ? segment.words[i - 1].endSec : null;
+        // 이전 단어 정보: 이미 조정된 단어의 끝 시간 사용
+        final previousWordEnd = i > 0 ? refinedWords[i - 1].endSec : null;
+        // 다음 단어 정보: 아직 조정 안 된 원본 시간 사용 (참고용)
         final nextWordStart = i < segment.words.length - 1 ? segment.words[i + 1].startSec : null;
 
         // 에너지 기반으로 실제 발화 시작/끝 찾기 (적극적 범위)
@@ -2201,8 +2202,12 @@ ${jsonEncode(formatted)}
           score: word.score,
         ));
 
-        if (kDebugMode && ((finalStart - approximateStart).abs() > 0.05 || (finalEnd - approximateEnd).abs() > 0.05)) {
-          print('  단어 "${word.word}": ${approximateStart.toStringAsFixed(2)}-${approximateEnd.toStringAsFixed(2)}s → ${finalStart.toStringAsFixed(2)}-${finalEnd.toStringAsFixed(2)}s');
+        // 모든 단어 조정 로그 출력
+        if (kDebugMode) {
+          final startDiff = (finalStart - approximateStart).abs();
+          final endDiff = (finalEnd - approximateEnd).abs();
+          final adjustmentMark = (startDiff > 0.01 || endDiff > 0.01) ? '🔧' : '✓';
+          print('  $adjustmentMark 단어 #${i + 1} "${word.word}": ${approximateStart.toStringAsFixed(2)}-${approximateEnd.toStringAsFixed(2)}s → ${finalStart.toStringAsFixed(2)}-${finalEnd.toStringAsFixed(2)}s');
         }
       }
 
