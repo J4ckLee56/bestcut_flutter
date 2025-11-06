@@ -1040,8 +1040,7 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
           );
         },
       ),
-            ),
-          ),
+          ],
         ),
       ),
     );
