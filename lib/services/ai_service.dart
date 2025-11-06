@@ -2543,18 +2543,22 @@ ${jsonEncode(formatted)}
           i < segment.words.length - 1 ? segment.words[i + 1].startSec : null,
         );
 
-        double normalizedStart = refinedWords.isEmpty
-            ? _floorToCentisecond(math.max(actualStart, baselineStart))
-            : previousTokenEnd;
-
+        // actualStart 사용 (에너지 기반 조정 적용)
+        double normalizedStart = _floorToCentisecond(actualStart);
+        
+        // 첫 단어: 이전 세그먼트 끝 또는 세그먼트 시작 이후여야 함
         if (refinedWords.isEmpty) {
           if (lastWordEndInPreviousSegment != null) {
-            normalizedStart = lastWordEndInPreviousSegment!;
+            normalizedStart = math.max(normalizedStart, lastWordEndInPreviousSegment!);
           } else {
-            normalizedStart = segmentStartRounded;
+            normalizedStart = math.max(normalizedStart, segmentStartRounded);
           }
+        } else {
+          // 이후 단어: 이전 단어 끝 이후여야 함 (연속성 보장)
+          normalizedStart = math.max(normalizedStart, previousTokenEnd);
         }
-
+        
+        // 간격이 있으면 무음으로 기록
         if (refinedWords.isNotEmpty && normalizedStart > previousTokenEnd + gapTolerance) {
           final double gapStart = previousTokenEnd;
           final double gapEnd = normalizedStart;
@@ -2566,13 +2570,8 @@ ${jsonEncode(formatted)}
             ));
           }
           if (kDebugMode) {
-            print('   ↔ 간격 제거: ${gapStart.toStringAsFixed(2)}s ~ ${gapEnd.toStringAsFixed(2)}s → ${gapStart.toStringAsFixed(2)}s (무음 통합)');
+            print('   ↔ 단어 간 여유 제거: ${gapStart.toStringAsFixed(2)}s ~ ${gapEnd.toStringAsFixed(2)}s → ${gapStart.toStringAsFixed(2)}s (무음 통합)');
           }
-          normalizedStart = gapStart;
-        }
-
-        if (normalizedStart < previousTokenEnd) {
-          normalizedStart = previousTokenEnd;
         }
 
         double normalizedEnd = _ceilToCentisecond(actualEnd);
@@ -2597,6 +2596,22 @@ ${jsonEncode(formatted)}
         } else {
           normalizedEnd = math.min(normalizedEnd, segmentEndRounded);
         }
+        
+        // 조정 로그 출력
+        if (kDebugMode) {
+          final startChanged = (normalizedStart - approximateStart).abs() > 0.01;
+          final endChanged = (normalizedEnd - approximateEnd).abs() > 0.01;
+          if (startChanged || endChanged) {
+            print('  🔧 단어 #${i + 1} "${word.word}": '
+                '${approximateStart.toStringAsFixed(2)}-${approximateEnd.toStringAsFixed(2)}s → '
+                '${normalizedStart.toStringAsFixed(2)}-${normalizedEnd.toStringAsFixed(2)}s '
+                '(prev=${previousTokenEnd.toStringAsFixed(2)})');
+          } else {
+            print('   ✓ 단어 #${i + 1} "${word.word}": '
+                '${approximateStart.toStringAsFixed(2)}-${approximateEnd.toStringAsFixed(2)}s → '
+                '${normalizedStart.toStringAsFixed(2)}-${normalizedEnd.toStringAsFixed(2)}s');
+          }
+        }
 
         refinedWords.add(WordSegment(
           index: word.index,
@@ -2605,22 +2620,6 @@ ${jsonEncode(formatted)}
           endSec: normalizedEnd,
           score: word.score,
         ));
-
-        if (kDebugMode) {
-          final startDiff = (normalizedStart - approximateStart).abs();
-          final endDiff = (normalizedEnd - approximateEnd).abs();
-          final adjustmentMark = (startDiff > 0.01 || endDiff > 0.01) ? '🔧' : '✓';
-          final prevInfo = refinedWords.length > 1
-              ? ' (prev=${refinedWords[refinedWords.length - 2].endSec.toStringAsFixed(2)})'
-              : (lastWordEndInPreviousSegment != null
-                  ? ' (prev=${lastWordEndInPreviousSegment!.toStringAsFixed(2)})'
-                  : '');
-          print(
-            '  $adjustmentMark 단어 #${i + 1} "${word.word}": '
-            '${approximateStart.toStringAsFixed(2)}-${approximateEnd.toStringAsFixed(2)}s '
-            '→ ${normalizedStart.toStringAsFixed(2)}-${normalizedEnd.toStringAsFixed(2)}s$prevInfo',
-          );
-        }
 
         // 다음 토큰과의 간격 정보 (무음 기록 없음)
         final double nextApproximateStart =
