@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import '../models/app_state.dart';
 import '../models/whisper_segment.dart';
 import '../utils/constants.dart';
@@ -228,7 +229,7 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     
     return GestureDetector(
       key: widget.appState.segmentKeys[index],
-      behavior: HitTestBehavior.translucent,  // 자식 클릭 허용, 빈 영역만 부모 클릭
+      behavior: HitTestBehavior.deferToChild,  // 자식(단어) 클릭을 우선
       onTap: () => widget.onSegmentTap(index),
       onSecondaryTap: () => _toggleSummarySegment(index),
       onDoubleTap: () => _startEditing(index),
@@ -488,11 +489,12 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
 
     return Tooltip(
       message: '${_formatTimeFromSeconds(word.startSec)} ~ ${_formatTimeFromSeconds(word.endSec)}',
-      child: InkWell(
+      child: GestureDetector(
         onTap: () {
+          if (kDebugMode) print('🖱️ 단어 "${word.word}" 클릭됨 (세그먼트 $segmentIndex)');
           widget.onSegmentTap(segmentIndex);  // 세그먼트 클릭과 동일하게 동작
         },
-        borderRadius: BorderRadius.circular(CursorTheme.radiusSmall),
+        behavior: HitTestBehavior.opaque,  // 클릭 영역을 명확히 지정하고 부모 제스처 차단
         child: Container(
           padding: const EdgeInsets.symmetric(
             horizontal: CursorTheme.spacingXS,
@@ -501,7 +503,7 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
           decoration: CursorTheme.containerDecoration(
             backgroundColor: background,
             borderColor: borderColor,
-            borderRadius: CursorTheme.radiusSmall,
+            borderRadius: BorderRadius.circular(CursorTheme.radiusSmall),
           ),
           child: Text(
             word.word,
