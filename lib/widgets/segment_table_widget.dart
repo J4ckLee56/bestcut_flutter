@@ -138,6 +138,9 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
       _selectedWordIndex = null;
       _selectedSilenceSegmentIndex = segmentIndex;
       _selectedSilenceIndex = silenceIndex;
+      // 무음칩 클릭 시 다중 선택 초기화
+      _selectedSegmentIndices.clear();
+      _dragStartIndex = null;
     });
   }
   
@@ -172,31 +175,83 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
   
   // 세그먼트 분할 처리
   void _handleSplitSegment() {
-    // 단어가 선택되어 있어야 함
-    if (_selectedWordSegmentIndex == null || _selectedWordIndex == null) {
-      _showSnackBar('분할할 단어를 먼저 선택하세요.');
-      return;
-    }
-    
-    if (_selectedWordIndex == 0) {
-      _showSnackBar('첫 번째 단어는 분할 기준이 될 수 없습니다.');
-      return;
-    }
-    
-    final success = widget.appState.splitSegmentAtWord(
-      _selectedWordSegmentIndex!,
-      _selectedWordIndex!,
-    );
-    
-    if (success) {
-      setState(() {
-        _selectedWordSegmentIndex = null;
-        _selectedWordIndex = null;
-      });
-      _showSnackBar('✂️ 세그먼트 분할 완료');
+    // 단어 또는 무음이 선택되어 있어야 함
+    if (_selectedWordSegmentIndex != null && _selectedWordIndex != null) {
+      // 단어 기준 분할
+      if (_selectedWordIndex == 0) {
+        _showSnackBar('첫 번째 단어는 분할 기준이 될 수 없습니다.');
+        return;
+      }
+      
+      final success = widget.appState.splitSegmentAtWord(
+        _selectedWordSegmentIndex!,
+        _selectedWordIndex!,
+      );
+      
+      if (success) {
+        setState(() {
+          _selectedWordSegmentIndex = null;
+          _selectedWordIndex = null;
+        });
+        _showSnackBar('✂️ 세그먼트 분할 완료');
+      } else {
+        _showSnackBar('❌ 세그먼트 분할 실패');
+      }
+    } else if (_selectedSilenceSegmentIndex != null && _selectedSilenceIndex != null) {
+      // 무음 기준 분할
+      final success = _splitSegmentAtSilence(
+        _selectedSilenceSegmentIndex!,
+        _selectedSilenceIndex!,
+      );
+      
+      if (success) {
+        setState(() {
+          _selectedSilenceSegmentIndex = null;
+          _selectedSilenceIndex = null;
+        });
+        _showSnackBar('✂️ 세그먼트 분할 완료 (무음 기준)');
+      } else {
+        _showSnackBar('❌ 세그먼트 분할 실패');
+      }
     } else {
-      _showSnackBar('❌ 세그먼트 분할 실패');
+      _showSnackBar('분할할 단어 또는 무음을 먼저 선택하세요.');
     }
+  }
+  
+  // 무음 기준으로 세그먼트 분할
+  bool _splitSegmentAtSilence(int segmentIndex, int silenceIndex) {
+    final segment = widget.appState.segments[segmentIndex];
+    
+    if (silenceIndex < 0 || silenceIndex >= segment.silences.length) {
+      if (kDebugMode) {
+        print('❌ 잘못된 무음 인덱스: $silenceIndex');
+      }
+      return false;
+    }
+    
+    final silence = segment.silences[silenceIndex];
+    
+    // 무음 구간의 중간 지점을 기준으로 분할할 단어 찾기
+    final splitTime = (silence.startSec + silence.endSec) / 2;
+    
+    // splitTime 이후의 첫 번째 단어 인덱스 찾기
+    int? wordIndexToSplit;
+    for (int i = 0; i < segment.words.length; i++) {
+      if (segment.words[i].startSec >= splitTime) {
+        wordIndexToSplit = i;
+        break;
+      }
+    }
+    
+    if (wordIndexToSplit == null || wordIndexToSplit == 0) {
+      if (kDebugMode) {
+        print('❌ 무음 위치에서 분할할 단어를 찾을 수 없습니다.');
+      }
+      return false;
+    }
+    
+    // 찾은 단어 기준으로 분할
+    return widget.appState.splitSegmentAtWord(segmentIndex, wordIndexToSplit);
   }
   
   // 세그먼트 병합 처리
@@ -406,6 +461,25 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
                       '단축키 S: 선택한 단어 앞에서 분할',
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         color: CursorTheme.cursorBlue,
+                        fontWeight: FontWeight.w500,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ),
+                if (_selectedSilenceSegmentIndex != null && _selectedSilenceIndex != null)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: CursorTheme.spacingXS,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: CursorTheme.warning.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(CursorTheme.radiusSmall),
+                    ),
+                    child: Text(
+                      '단축키 S: 선택한 무음 기준으로 분할',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: CursorTheme.warning,
                         fontWeight: FontWeight.w500,
                         fontSize: 10,
                       ),
