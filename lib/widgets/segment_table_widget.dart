@@ -320,6 +320,27 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     
     final silence = segment.silences[silenceIndex];
     
+    if (kDebugMode) {
+      print('📍 무음칩 분할 시도:');
+      print('  - 세그먼트 인덱스: $segmentIndex');
+      print('  - 무음 인덱스: $silenceIndex');
+      print('  - 무음 시작: ${silence.startSec.toStringAsFixed(2)}s');
+      print('  - 무음 끝: ${silence.endSec.toStringAsFixed(2)}s');
+      print('  - 세그먼트 총 단어 수: ${segment.words.length}');
+      print('  - 세그먼트 총 무음 수: ${segment.silences.length}');
+      
+      // 세그먼트 내 모든 단어와 무음 위치 출력
+      print('  - 세그먼트 구조:');
+      for (int i = 0; i < segment.words.length; i++) {
+        final word = segment.words[i];
+        print('    words[$i]: "${word.word}" (${word.startSec.toStringAsFixed(2)}s - ${word.endSec.toStringAsFixed(2)}s)');
+      }
+      for (int i = 0; i < segment.silences.length; i++) {
+        final s = segment.silences[i];
+        print('    silences[$i]: 무음 (${s.startSec.toStringAsFixed(2)}s - ${s.endSec.toStringAsFixed(2)}s)');
+      }
+    }
+    
     // 무음 뒤의 첫 번째 단어 찾기
     // 무음 끝 시점(endSec) 이후의 첫 번째 단어부터 새 세그먼트
     int? wordIndexToSplit;
@@ -327,6 +348,13 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
       if (segment.words[i].startSec >= silence.endSec) {
         wordIndexToSplit = i;
         break;
+      }
+    }
+    
+    if (kDebugMode) {
+      print('  - 무음 뒤 첫 단어 인덱스: $wordIndexToSplit');
+      if (wordIndexToSplit != null && wordIndexToSplit < segment.words.length) {
+        print('  - 무음 뒤 첫 단어: "${segment.words[wordIndexToSplit].word}"');
       }
     }
     
@@ -347,10 +375,16 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     // 무음만 있는 세그먼트를 만들기 위해서는 wordIndex == 0을 허용해야 함
     // → 특별 처리: wordIndexToSplit == 0일 때는 수동으로 분할
     if (wordIndexToSplit == 0) {
+      if (kDebugMode) {
+        print('  → 수동 분할 호출 (무음만 있는 세그먼트 생성)');
+      }
       // 무음만 있는 첫 번째 세그먼트를 만들기 위한 특별 분할
       return _splitSegmentAtSilenceManual(segmentIndex, silence.endSec);
     }
     
+    if (kDebugMode) {
+      print('  → splitSegmentAtWord 호출 (wordIndex=$wordIndexToSplit)');
+    }
     // wordIndexToSplit >= 1: 정상적으로 splitSegmentAtWord 사용
     return widget.appState.splitSegmentAtWord(segmentIndex, wordIndexToSplit);
   }
