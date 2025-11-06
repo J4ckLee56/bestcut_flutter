@@ -337,6 +337,7 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
                   ? _buildEditingTextField(index)
                   : _buildSegmentWordWrap(
                       context,
+                      index,  // 세그먼트 인덱스 전달
                       segment,
                       isActive: isPlaying || isSelected,
                     ),
@@ -393,7 +394,7 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     }
   }
 
-  Widget _buildSegmentWordWrap(BuildContext context, WhisperSegment segment, {required bool isActive}) {
+  Widget _buildSegmentWordWrap(BuildContext context, int segmentIndex, WhisperSegment segment, {required bool isActive}) {
     final words = segment.words;
     final silences = segment.silences;
     
@@ -437,9 +438,10 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
         }
       }
       
-      // 단어 칩 추가
+      // 단어 칩 추가 (클릭 가능)
       widgets.add(_buildWordChip(
         context,
+        segmentIndex,  // 세그먼트 인덱스 전달
         word,
         isHighlighted: currentSec >= word.startSec && currentSec < word.endSec,
       ));
@@ -477,30 +479,33 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     );
   }
 
-  Widget _buildWordChip(BuildContext context, WordSegment word, {required bool isHighlighted}) {
+  Widget _buildWordChip(BuildContext context, int segmentIndex, WordSegment word, {required bool isHighlighted}) {
     final background = isHighlighted
         ? CursorTheme.cursorBlue.withOpacity(0.2)
         : CursorTheme.backgroundSecondary;
     final borderColor = isHighlighted ? CursorTheme.cursorBlue : CursorTheme.borderSecondary;
 
-    return Tooltip(
-      message: '${_formatTimeFromSeconds(word.startSec)} ~ ${_formatTimeFromSeconds(word.endSec)}',
-      child: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: CursorTheme.spacingXS,
-          vertical: 4,
-        ),
-        decoration: CursorTheme.containerDecoration(
-          backgroundColor: background,
-          borderColor: borderColor,
-          borderRadius: CursorTheme.radiusSmall,
-        ),
-        child: Text(
-          word.word,
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: isHighlighted ? CursorTheme.cursorBlue : CursorTheme.textPrimary,
-                fontWeight: isHighlighted ? FontWeight.w600 : FontWeight.w500,
-              ),
+    return GestureDetector(
+      onTap: () => widget.onSegmentTap(segmentIndex),  // 세그먼트 클릭과 동일하게 동작
+      child: Tooltip(
+        message: '${_formatTimeFromSeconds(word.startSec)} ~ ${_formatTimeFromSeconds(word.endSec)}',
+        child: Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: CursorTheme.spacingXS,
+            vertical: 4,
+          ),
+          decoration: CursorTheme.containerDecoration(
+            backgroundColor: background,
+            borderColor: borderColor,
+            borderRadius: CursorTheme.radiusSmall,
+          ),
+          child: Text(
+            word.word,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: isHighlighted ? CursorTheme.cursorBlue : CursorTheme.textPrimary,
+                  fontWeight: isHighlighted ? FontWeight.w600 : FontWeight.w500,
+                ),
+          ),
         ),
       ),
     );
