@@ -812,10 +812,12 @@ class AIService {
     required String projectRoot,
   }) async {
     _checkCancellation();
+    
+    print('=== WhisperX 단어 정렬 시작 ===');
 
     final whisperJsonPath = '$audioPath.json';
     if (!File(whisperJsonPath).existsSync()) {
-      if (kDebugMode) print('Whisper JSON 파일이 없어 정렬을 건너뜁니다: $whisperJsonPath');
+      print('⚠️ Whisper JSON 파일이 없어 정렬을 건너뜁니다: $whisperJsonPath');
       return baseSegments;
     }
 
@@ -903,15 +905,22 @@ class AIService {
     _checkCancellation();
 
     if (result.exitCode != 0) {
+      print('❌ WhisperX 정렬 실패 (${result.exitCode})');
       if (kDebugMode) {
-        print('WhisperX 정렬 실패 (${result.exitCode}): ${result.stderr}');
+        print('   stderr: ${result.stderr}');
+        print('   stdout: ${result.stdout}');
       }
       return baseSegments;
+    }
+    
+    print('✅ WhisperX Python 스크립트 실행 성공');
+    if (kDebugMode && result.stdout.toString().isNotEmpty) {
+      print('   stdout: ${result.stdout}');
     }
 
     final alignedFile = File(alignedJsonPath);
     if (!alignedFile.existsSync()) {
-      if (kDebugMode) print('WhisperX 정렬 결과 파일을 찾을 수 없습니다.');
+      print('⚠️ WhisperX 정렬 결과 파일을 찾을 수 없습니다: $alignedJsonPath');
       return baseSegments;
     }
 
@@ -995,9 +1004,17 @@ class AIService {
       }
 
       alignedSegments.sort((a, b) => a.startSec.compareTo(b.startSec));
+      
+      // 단어 정렬 통계
+      int totalWords = 0;
+      for (final seg in alignedSegments) {
+        totalWords += seg.words.length;
+      }
+      print('✅ WhisperX 단어 정렬 완료: ${alignedSegments.length}개 세그먼트, $totalWords개 단어');
+      
       return alignedSegments;
     } catch (e) {
-      if (kDebugMode) print('WhisperX 정렬 JSON 파싱 실패: $e');
+      print('❌ WhisperX 정렬 JSON 파싱 실패: $e');
       return baseSegments;
     }
   }
