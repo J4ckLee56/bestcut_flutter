@@ -458,57 +458,55 @@ class AppState extends ChangeNotifier {
       return false;
     }
     
-    // 첫 번째 세그먼트: 원본 시작 ~ 분할 단어 직전까지
+    // 첫 번째 세그먼트: 원본 시작 ~ 분할 단어 직전까지 (무음 포함)
     final firstWords = segment.words.sublist(0, wordIndex);
-    final firstSilences = <SilenceSegment>[];
     
-    // 두 번째 세그먼트: 분할 단어 ~ 원본 끝까지
+    // 두 번째 세그먼트: 분할 단어 ~ 원본 끝까지 (무음 포함)
     final secondWords = segment.words.sublist(wordIndex);
-    final secondSilences = <SilenceSegment>[];
     
-    // 분할 시점 결정: 첫 번째 세그먼트의 마지막 단어 끝 시점
+    // 분할 시점 결정: 첫 번째 세그먼트의 마지막 토큰 끝 시점
     final splitTime = firstWords.last.endSec;
     
-    // 무음 구간 재분배: splitTime 기준으로 나누기
-    for (final silence in segment.silences) {
-      if (silence.endSec <= splitTime) {
-        firstSilences.add(silence);
-      } else if (silence.startSec >= splitTime) {
-        secondSilences.add(silence);
-      } else {
-        // 무음이 분할 지점을 걸치는 경우: 분할
-        firstSilences.add(SilenceSegment(
-          startSec: silence.startSec,
-          endSec: splitTime,
-          duration: splitTime - silence.startSec,
-        ));
-        secondSilences.add(SilenceSegment(
-          startSec: splitTime,
-          endSec: silence.endSec,
-          duration: silence.endSec - splitTime,
-        ));
-      }
+    // 인덱스 재조정
+    final adjustedFirstWords = <WordSegment>[];
+    for (int i = 0; i < firstWords.length; i++) {
+      adjustedFirstWords.add(firstWords[i].copyWith(index: i));
+    }
+    
+    final adjustedSecondWords = <WordSegment>[];
+    for (int i = 0; i < secondWords.length; i++) {
+      adjustedSecondWords.add(secondWords[i].copyWith(index: i));
     }
     
     // 첫 번째 세그먼트 생성 (기존 ID 유지)
+    // text는 단어만 (무음 제외)
+    final firstText = adjustedFirstWords
+        .where((w) => !w.isSilence)
+        .map((w) => w.word)
+        .join(' ');
+    
     final firstSegment = WhisperSegment(
       id: segment.id,
       startSec: segment.startSec,
       endSec: splitTime,
-      text: firstWords.map((w) => w.word).join(' '),
-      words: firstWords,
-      silences: firstSilences,
+      text: firstText,
+      words: adjustedFirstWords,
       isSummary: segment.isSummary,
     );
     
     // 두 번째 세그먼트 생성 (새 ID: 기존 ID + 1)
+    // text는 단어만 (무음 제외)
+    final secondText = adjustedSecondWords
+        .where((w) => !w.isSilence)
+        .map((w) => w.word)
+        .join(' ');
+    
     final secondSegment = WhisperSegment(
       id: segment.id + 1,
       startSec: splitTime,
       endSec: segment.endSec,
-      text: secondWords.map((w) => w.word).join(' '),
-      words: secondWords,
-      silences: secondSilences,
+      text: secondText,
+      words: adjustedSecondWords,
       isSummary: segment.isSummary,
     );
     
@@ -525,7 +523,6 @@ class AppState extends ChangeNotifier {
         endSec: seg.endSec,
         text: seg.text,
         words: seg.words,
-        silences: seg.silences,
         isSummary: seg.isSummary,
       );
     }
@@ -568,27 +565,34 @@ class AppState extends ChangeNotifier {
     // 병합할 세그먼트들 수집
     final segmentsToMerge = sortedIndices.map((i) => _segments[i]).toList();
     
-    // 모든 단어와 무음 합치기
+    // 모든 단어(무음 포함) 합치기
     final allWords = <WordSegment>[];
-    final allSilences = <SilenceSegment>[];
     
     for (final segment in segmentsToMerge) {
       allWords.addAll(segment.words);
-      allSilences.addAll(segment.silences);
     }
     
     // 시간순 정렬
     allWords.sort((a, b) => a.startSec.compareTo(b.startSec));
-    allSilences.sort((a, b) => a.startSec.compareTo(b.startSec));
+    
+    // 인덱스 재조정
+    for (int i = 0; i < allWords.length; i++) {
+      allWords[i] = allWords[i].copyWith(index: i);
+    }
+    
+    // text는 단어만 (무음 제외)
+    final mergedText = allWords
+        .where((w) => !w.isSilence)
+        .map((w) => w.word)
+        .join(' ');
     
     // 병합된 세그먼트 생성
     final mergedSegment = WhisperSegment(
       id: segmentsToMerge.first.id,
       startSec: segmentsToMerge.first.startSec,
       endSec: segmentsToMerge.last.endSec,
-      text: allWords.map((w) => w.word).join(' '),
+      text: mergedText,
       words: allWords,
-      silences: allSilences,
       isSummary: segmentsToMerge.any((s) => s.isSummary == true),
     );
     
@@ -605,7 +609,6 @@ class AppState extends ChangeNotifier {
         endSec: seg.endSec,
         text: seg.text,
         words: seg.words,
-        silences: seg.silences,
         isSummary: seg.isSummary,
       );
     }
