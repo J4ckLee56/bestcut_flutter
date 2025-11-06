@@ -641,8 +641,8 @@ class AIService {
 
       print('whisper.cpp 성공: ${enrichedSegments.length}개 세그먼트 (단어 포함=${enrichedSegments.isNotEmpty && enrichedSegments.first.words.isNotEmpty})');
       
-      // 1단계: 에너지 프로파일로 단어 경계 미세 조정 (보수적)
-      print('=== 에너지 기반 단어 경계 미세 조정 시작 (보수적) ===');
+      // 1단계: 에너지 프로파일로 단어 경계 미세 조정 (적극적)
+      print('=== 에너지 기반 단어 경계 미세 조정 시작 (적극적) ===');
       final energyRefinedSegments = _refineWordBoundariesWithEnergy(enrichedSegments, energyProfile);
       print('에너지 기반 단어 경계 조정 완료');
       
@@ -2088,15 +2088,15 @@ ${jsonEncode(formatted)}
   }
 
 
-  // 에너지 프로파일에서 실제 단어 시작 지점 찾기 (보수적 조정)
+  // 에너지 프로파일에서 실제 단어 시작 지점 찾기 (적극적 조정)
   double _findActualWordStart(
     double approximateStart, 
     List<AudioEnergyFrame> energyProfile,
     double? previousWordEnd,  // 이전 단어 끝 시간
   ) {
-    // 보수적 탐색: 시작점은 약간만 앞, 주로 뒤로 탐색
-    const double searchBefore = 0.05; // 앞으로 50ms만
-    const double searchAfter = 0.15;  // 뒤로 150ms
+    // 적극적 탐색: 더 넓은 범위 탐색
+    const double searchBefore = 0.1;  // 앞으로 100ms
+    const double searchAfter = 0.2;   // 뒤로 200ms
     const double voiceThreshold = -40.0; // -40dB 이상은 음성
 
     // 이전 단어와 겹치지 않도록 최소 시작 시간 설정
@@ -2121,15 +2121,15 @@ ${jsonEncode(formatted)}
     return approximateStart; // 찾지 못하면 원래 값 유지
   }
 
-  // 에너지 프로파일에서 실제 단어 끝 지점 찾기 (보수적 조정)
+  // 에너지 프로파일에서 실제 단어 끝 지점 찾기 (적극적 조정)
   double _findActualWordEnd(
     double approximateEnd, 
     List<AudioEnergyFrame> energyProfile,
     double? nextWordStart,  // 다음 단어 시작 시간
   ) {
-    // 보수적 탐색: 끝점은 주로 앞, 약간만 뒤로 탐색
-    const double searchBefore = 0.15; // 앞으로 150ms
-    const double searchAfter = 0.05;  // 뒤로 50ms만
+    // 적극적 탐색: 더 넓은 범위 탐색
+    const double searchBefore = 0.2;  // 앞으로 200ms
+    const double searchAfter = 0.1;   // 뒤로 100ms
     const double voiceThreshold = -40.0; // -40dB 이상은 음성
 
     // 다음 단어와 겹치지 않도록 최대 끝 시간 설정
@@ -2154,7 +2154,7 @@ ${jsonEncode(formatted)}
     return approximateEnd; // 찾지 못하면 원래 값 유지
   }
 
-  // 에너지 프로파일 기반 단어 경계 미세 조정 (보수적)
+  // 에너지 프로파일 기반 단어 경계 미세 조정 (적극적)
   List<WhisperSegment> _refineWordBoundariesWithEnergy(
     List<WhisperSegment> segments,
     List<AudioEnergyFrame> energyProfile,
@@ -2185,7 +2185,7 @@ ${jsonEncode(formatted)}
         final previousWordEnd = i > 0 ? segment.words[i - 1].endSec : null;
         final nextWordStart = i < segment.words.length - 1 ? segment.words[i + 1].startSec : null;
 
-        // 에너지 기반으로 실제 발화 시작/끝 찾기 (보수적 범위)
+        // 에너지 기반으로 실제 발화 시작/끝 찾기 (적극적 범위)
         final actualStart = _findActualWordStart(approximateStart, energyProfile, previousWordEnd);
         final actualEnd = _findActualWordEnd(approximateEnd, energyProfile, nextWordStart);
 
@@ -2201,7 +2201,7 @@ ${jsonEncode(formatted)}
           score: word.score,
         ));
 
-        if (kDebugMode && ((finalStart - approximateStart).abs() > 0.03 || (finalEnd - approximateEnd).abs() > 0.03)) {
+        if (kDebugMode && ((finalStart - approximateStart).abs() > 0.05 || (finalEnd - approximateEnd).abs() > 0.05)) {
           print('  단어 "${word.word}": ${approximateStart.toStringAsFixed(2)}-${approximateEnd.toStringAsFixed(2)}s → ${finalStart.toStringAsFixed(2)}-${finalEnd.toStringAsFixed(2)}s');
         }
       }
