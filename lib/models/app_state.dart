@@ -441,4 +441,176 @@ class AppState extends ChangeNotifier {
     final seconds = duration.inSeconds.remainder(60);
     return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
   }
+  
+  /// 세그먼트를 특정 단어 앞에서 분할
+  /// [segmentIndex]: 분할할 세그먼트의 인덱스
+  /// [wordIndex]: 분할 기준이 되는 단어의 인덱스 (이 단어부터 새 세그먼트로)
+  /// 반환: 성공 여부
+  bool splitSegmentAtWord(int segmentIndex, int wordIndex) {
+    if (segmentIndex < 0 || segmentIndex >= _segments.length) {
+      print('❌ 잘못된 세그먼트 인덱스: $segmentIndex');
+      return false;
+    }
+    
+    final segment = _segments[segmentIndex];
+    if (wordIndex <= 0 || wordIndex >= segment.words.length) {
+      print('❌ 잘못된 단어 인덱스: $wordIndex (세그먼트 단어 수: ${segment.words.length})');
+      return false;
+    }
+    
+    // 첫 번째 세그먼트: 원본 시작 ~ 분할 단어 직전까지
+    final firstWords = segment.words.sublist(0, wordIndex);
+    final firstSilences = <SilenceSegment>[];
+    
+    // 두 번째 세그먼트: 분할 단어 ~ 원본 끝까지
+    final secondWords = segment.words.sublist(wordIndex);
+    final secondSilences = <SilenceSegment>[];
+    
+    // 무음 구간 재분배: 첫 번째 세그먼트 끝시간 기준으로 나누기
+    final splitTime = firstWords.last.endSec;
+    for (final silence in segment.silences) {
+      if (silence.endSec <= splitTime) {
+        firstSilences.add(silence);
+      } else if (silence.startSec >= splitTime) {
+        secondSilences.add(silence);
+      } else {
+        // 무음이 분할 지점을 걸치는 경우: 분할
+        firstSilences.add(SilenceSegment(
+          startSec: silence.startSec,
+          endSec: splitTime,
+          duration: splitTime - silence.startSec,
+        ));
+        secondSilences.add(SilenceSegment(
+          startSec: splitTime,
+          endSec: silence.endSec,
+          duration: silence.endSec - splitTime,
+        ));
+      }
+    }
+    
+    // 첫 번째 세그먼트 생성 (기존 ID 유지)
+    final firstSegment = WhisperSegment(
+      id: segment.id,
+      startSec: segment.startSec,
+      endSec: splitTime,
+      text: firstWords.map((w) => w.word).join(' '),
+      words: firstWords,
+      silences: firstSilences,
+      isSummary: segment.isSummary,
+    );
+    
+    // 두 번째 세그먼트 생성 (새 ID: 기존 ID + 0.5)
+    final secondSegment = WhisperSegment(
+      id: segment.id + 1, // 새 ID는 다음 정수로
+      startSec: splitTime,
+      endSec: segment.endSec,
+      text: secondWords.map((w) => w.word).join(' '),
+      words: secondWords,
+      silences: secondSilences,
+      isSummary: segment.isSummary,
+    );
+    
+    // 세그먼트 목록 업데이트
+    _segments[segmentIndex] = firstSegment;
+    _segments.insert(segmentIndex + 1, secondSegment);
+    
+    // 이후 세그먼트들의 ID 재조정
+    for (int i = segmentIndex + 2; i < _segments.length; i++) {
+      final seg = _segments[i];
+      _segments[i] = WhisperSegment(
+        id: i + 1,
+        startSec: seg.startSec,
+        endSec: seg.endSec,
+        text: seg.text,
+        words: seg.words,
+        silences: seg.silences,
+        isSummary: seg.isSummary,
+      );
+    }
+    
+    print('✂️ 세그먼트 #${segment.id} 분할 완료: "${segment.text}" → "${firstSegment.text}" | "${secondSegment.text}"');
+    
+    notifyListeners();
+    return true;
+  }
+  
+  /// 여러 세그먼트를 하나로 병합
+  /// [segmentIndices]: 병합할 세그먼트들의 인덱스 목록 (정렬된 상태로 전달)
+  /// 반환: 성공 여부
+  bool mergeSegments(List<int> segmentIndices) {
+    if (segmentIndices.length < 2) {
+      print('❌ 병합하려면 최소 2개 이상의 세그먼트가 필요합니다.');
+      return false;
+    }
+    
+    // 정렬 및 유효성 검사
+    final sortedIndices = segmentIndices.toList()..sort();
+    for (final index in sortedIndices) {
+      if (index < 0 || index >= _segments.length) {
+        print('❌ 잘못된 세그먼트 인덱스: $index');
+        return false;
+      }
+    }
+    
+    // 연속된 세그먼트인지 확인
+    for (int i = 0; i < sortedIndices.length - 1; i++) {
+      if (sortedIndices[i + 1] != sortedIndices[i] + 1) {
+        print('❌ 병합할 세그먼트들이 연속되어 있지 않습니다.');
+        return false;
+      }
+    }
+    
+    final firstIndex = sortedIndices.first;
+    final lastIndex = sortedIndices.last;
+    
+    // 병합할 세그먼트들 수집
+    final segmentsToMerge = sortedIndices.map((i) => _segments[i]).toList();
+    
+    // 모든 단어와 무음 합치기
+    final allWords = <WordSegment>[];
+    final allSilences = <SilenceSegment>[];
+    
+    for (final segment in segmentsToMerge) {
+      allWords.addAll(segment.words);
+      allSilences.addAll(segment.silences);
+    }
+    
+    // 시간순 정렬
+    allWords.sort((a, b) => a.startSec.compareTo(b.startSec));
+    allSilences.sort((a, b) => a.startSec.compareTo(b.startSec));
+    
+    // 병합된 세그먼트 생성
+    final mergedSegment = WhisperSegment(
+      id: segmentsToMerge.first.id,
+      startSec: segmentsToMerge.first.startSec,
+      endSec: segmentsToMerge.last.endSec,
+      text: allWords.map((w) => w.word).join(' '),
+      words: allWords,
+      silences: allSilences,
+      isSummary: segmentsToMerge.any((s) => s.isSummary == true),
+    );
+    
+    // 세그먼트 목록 업데이트
+    _segments[firstIndex] = mergedSegment;
+    _segments.removeRange(firstIndex + 1, lastIndex + 1);
+    
+    // 이후 세그먼트들의 ID 재조정
+    for (int i = firstIndex + 1; i < _segments.length; i++) {
+      final seg = _segments[i];
+      _segments[i] = WhisperSegment(
+        id: i + 1,
+        startSec: seg.startSec,
+        endSec: seg.endSec,
+        text: seg.text,
+        words: seg.words,
+        silences: seg.silences,
+        isSummary: seg.isSummary,
+      );
+    }
+    
+    print('📦 세그먼트 병합 완료: ${segmentIndices.length}개 → 1개 "${mergedSegment.text.substring(0, mergedSegment.text.length > 50 ? 50 : mergedSegment.text.length)}..."');
+    
+    notifyListeners();
+    return true;
+  }
 } 

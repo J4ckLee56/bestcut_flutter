@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import '../models/app_state.dart';
 import '../models/whisper_segment.dart';
 import '../utils/constants.dart';
@@ -44,10 +45,16 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
   int? _editingIndex;
   final TextEditingController _editController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final FocusNode _focusNode = FocusNode(); // 키보드 단축키를 위한 FocusNode
   int? _selectedWordSegmentIndex;
   int? _selectedWordIndex;
   int? _selectedSilenceSegmentIndex;
   int? _selectedSilenceIndex;
+  
+  // 다중 선택 상태
+  final Set<int> _selectedSegmentIndices = {};
+  int? _dragStartIndex;
+  bool _isDragging = false;
 
   @override
   void initState() {
@@ -84,6 +91,7 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     widget.appState.removeListener(_onAppStateChanged);
     _editController.dispose();
     _scrollController.dispose();
+    _focusNode.dispose();
     super.dispose();
   }
 
@@ -128,6 +136,117 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
       _selectedSilenceIndex = silenceIndex;
     });
   }
+  
+  // 키보드 단축키 핸들러
+  void _handleKeyPress(KeyEvent event) {
+    if (event is! KeyDownEvent) return;
+    
+    final key = event.logicalKey;
+    
+    // S키: 세그먼트 분할
+    if (key == LogicalKeyboardKey.keyS) {
+      _handleSplitSegment();
+    }
+    // M키: 세그먼트 병합
+    else if (key == LogicalKeyboardKey.keyM) {
+      _handleMergeSegments();
+    }
+  }
+  
+  // 세그먼트 분할 처리
+  void _handleSplitSegment() {
+    // 단어가 선택되어 있어야 함
+    if (_selectedWordSegmentIndex == null || _selectedWordIndex == null) {
+      _showSnackBar('분할할 단어를 먼저 선택하세요.');
+      return;
+    }
+    
+    if (_selectedWordIndex == 0) {
+      _showSnackBar('첫 번째 단어는 분할 기준이 될 수 없습니다.');
+      return;
+    }
+    
+    final success = widget.appState.splitSegmentAtWord(
+      _selectedWordSegmentIndex!,
+      _selectedWordIndex!,
+    );
+    
+    if (success) {
+      setState(() {
+        _selectedWordSegmentIndex = null;
+        _selectedWordIndex = null;
+      });
+      _showSnackBar('✂️ 세그먼트 분할 완료');
+    } else {
+      _showSnackBar('❌ 세그먼트 분할 실패');
+    }
+  }
+  
+  // 세그먼트 병합 처리
+  void _handleMergeSegments() {
+    if (_selectedSegmentIndices.length < 2) {
+      _showSnackBar('병합할 세그먼트를 2개 이상 선택하세요.');
+      return;
+    }
+    
+    final success = widget.appState.mergeSegments(_selectedSegmentIndices.toList());
+    
+    if (success) {
+      setState(() {
+        _selectedSegmentIndices.clear();
+        _dragStartIndex = null;
+        _isDragging = false;
+      });
+      _showSnackBar('📦 세그먼트 병합 완료');
+    } else {
+      _showSnackBar('❌ 세그먼트 병합 실패');
+    }
+  }
+  
+  // 세그먼트 다중 선택 시작
+  void _handleSegmentDragStart(int segmentIndex) {
+    setState(() {
+      _dragStartIndex = segmentIndex;
+      _isDragging = true;
+      _selectedSegmentIndices.clear();
+      _selectedSegmentIndices.add(segmentIndex);
+    });
+  }
+  
+  // 세그먼트 드래그 업데이트
+  void _handleSegmentDragUpdate(int segmentIndex) {
+    if (!_isDragging || _dragStartIndex == null) return;
+    
+    setState(() {
+      _selectedSegmentIndices.clear();
+      final start = _dragStartIndex! < segmentIndex ? _dragStartIndex! : segmentIndex;
+      final end = _dragStartIndex! > segmentIndex ? _dragStartIndex! : segmentIndex;
+      
+      for (int i = start; i <= end; i++) {
+        _selectedSegmentIndices.add(i);
+      }
+    });
+  }
+  
+  // 세그먼트 드래그 종료
+  void _handleSegmentDragEnd() {
+    setState(() {
+      _isDragging = false;
+      // dragStartIndex는 유지 (다중 선택 상태 유지)
+    });
+  }
+  
+  // 스낵바 표시 헬퍼
+  void _showSnackBar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 2),
+        backgroundColor: CursorTheme.backgroundSecondary,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -150,16 +269,22 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
       displaySegmentIndices = List.generate(widget.appState.segments.length, (index) => index);
     }
     
-    return Container(
-      decoration: CursorTheme.containerDecoration(
-        backgroundColor: CursorTheme.backgroundTertiary,
-        borderColor: CursorTheme.borderSecondary,
-        borderRadius: CursorTheme.radiusSmall,
-      ),
-      child: Column(
-        children: [
-          // 모드 표시 헤더
-          Container(
+    return KeyboardListener(
+      focusNode: _focusNode,
+      onKeyEvent: _handleKeyPress,
+      autofocus: true,
+      child: GestureDetector(
+        onTap: () => _focusNode.requestFocus(), // 클릭 시 포커스 요청
+        child: Container(
+          decoration: CursorTheme.containerDecoration(
+            backgroundColor: CursorTheme.backgroundTertiary,
+            borderColor: CursorTheme.borderSecondary,
+            borderRadius: CursorTheme.radiusSmall,
+          ),
+          child: Column(
+            children: [
+              // 모드 표시 헤더
+              Container(
             width: double.infinity,
             padding: const EdgeInsets.all(CursorTheme.spacingS),
             decoration: BoxDecoration(
@@ -194,6 +319,47 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
+                const Spacer(),
+                // 단축키 안내
+                if (_selectedWordSegmentIndex != null && _selectedWordIndex != null)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: CursorTheme.spacingXS,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: CursorTheme.cursorBlue.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(CursorTheme.radiusSmall),
+                    ),
+                    child: Text(
+                      '단축키 S: 선택한 단어 앞에서 분할',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: CursorTheme.cursorBlue,
+                        fontWeight: FontWeight.w500,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ),
+                if (_selectedSegmentIndices.length >= 2)
+                  Container(
+                    margin: const EdgeInsets.only(left: CursorTheme.spacingXS),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: CursorTheme.spacingXS,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: CursorTheme.primary.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(CursorTheme.radiusSmall),
+                    ),
+                    child: Text(
+                      '단축키 M: ${_selectedSegmentIndices.length}개 세그먼트 병합',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: CursorTheme.primary,
+                        fontWeight: FontWeight.w500,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -290,47 +456,64 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
                      currentSec >= segment.startSec &&
                      currentSec < segment.endSec;  // <= 대신 < 사용 (경계 중복 방지)
     
-    return GestureDetector(
-      key: widget.appState.segmentKeys[index],
-      behavior: HitTestBehavior.deferToChild,  // 자식(단어) 클릭을 우선
-      onTap: () {
-        widget.onSegmentTap(index);
-        if (_selectedWordSegmentIndex != null ||
-            _selectedWordIndex != null ||
-            _selectedSilenceSegmentIndex != null ||
-            _selectedSilenceIndex != null) {
-          setState(() {
-            _selectedWordSegmentIndex = null;
-            _selectedWordIndex = null;
-            _selectedSilenceSegmentIndex = null;
-            _selectedSilenceIndex = null;
-          });
+    // 다중 선택 여부 확인
+    final bool isMultiSelected = _selectedSegmentIndices.contains(index);
+    
+    return MouseRegion(
+      onEnter: (_) {
+        if (_isDragging) {
+          _handleSegmentDragUpdate(index);
         }
       },
-      onSecondaryTap: () => _toggleSummarySegment(index),
-      onDoubleTap: () => _startEditing(index),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: CursorTheme.spacingXS),
-        decoration: BoxDecoration(
-          color: isPlaying
-              ? CursorTheme.cursorBlue.withOpacity(0.2)
-              : isSelected 
-                  ? CursorTheme.cursorBlue.withOpacity(0.1)
-                  : isUnifiedSummary
-                      ? CursorTheme.warning.withOpacity(0.05)
-                      : CursorTheme.backgroundSecondary,
-          borderRadius: BorderRadius.circular(CursorTheme.radiusSmall),
-          border: Border.all(
-            color: isPlaying
-                ? CursorTheme.cursorBlue
-                : isSelected
-                    ? CursorTheme.cursorBlue
-                    : isUnifiedSummary
-                        ? CursorTheme.warning
-                        : CursorTheme.borderSecondary,
-            width: isPlaying || isSelected ? 2 : 1,
+      child: GestureDetector(
+        key: widget.appState.segmentKeys[index],
+        behavior: HitTestBehavior.deferToChild,  // 자식(단어) 클릭을 우선
+        onTap: () {
+          widget.onSegmentTap(index);
+          if (_selectedWordSegmentIndex != null ||
+              _selectedWordIndex != null ||
+              _selectedSilenceSegmentIndex != null ||
+              _selectedSilenceIndex != null) {
+            setState(() {
+              _selectedWordSegmentIndex = null;
+              _selectedWordIndex = null;
+              _selectedSilenceSegmentIndex = null;
+              _selectedSilenceIndex = null;
+            });
+          }
+        },
+        onSecondaryTap: () => _toggleSummarySegment(index),
+        onDoubleTap: () => _startEditing(index),
+        onLongPressStart: (_) => _handleSegmentDragStart(index),
+        onLongPressEnd: (_) => _handleSegmentDragEnd(),
+        child: Container(
+          margin: const EdgeInsets.only(bottom: CursorTheme.spacingXS),
+          decoration: BoxDecoration(
+            color: isMultiSelected
+                ? CursorTheme.primary.withOpacity(0.2)
+                : isPlaying
+                    ? CursorTheme.cursorBlue.withOpacity(0.2)
+                    : isSelected 
+                        ? CursorTheme.cursorBlue.withOpacity(0.1)
+                        : isUnifiedSummary
+                            ? CursorTheme.warning.withOpacity(0.05)
+                            : CursorTheme.backgroundSecondary,
+            borderRadius: BorderRadius.circular(CursorTheme.radiusSmall),
+            border: Border.all(
+              color: isMultiSelected
+                  ? CursorTheme.primary
+                  : isPlaying
+                      ? CursorTheme.cursorBlue
+                      : isSelected
+                          ? CursorTheme.cursorBlue
+                          : isUnifiedSummary
+                              ? CursorTheme.warning
+                              : CursorTheme.borderSecondary,
+              width: isMultiSelected || isPlaying || isSelected ? 2 : 1,
+            ),
           ),
         ),
+      ),
         child: Padding(
           padding: const EdgeInsets.all(CursorTheme.spacingS),
           child: Column(
@@ -857,6 +1040,10 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
             ),
           );
         },
+      ),
+            ),
+          ),
+        ),
       ),
     );
   }
