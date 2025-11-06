@@ -34,7 +34,78 @@ class AIService {
   final CreditService _creditService = CreditService();
   final FirebaseFunctionsService _functionsService = FirebaseFunctionsService();
 
+  static const double _kMinimumWordDuration = 0.05; // 50ms
+  static const double _kGapTolerance = 1e-6;
+  static const double _kMinimumFfmpegSilenceDuration = 0.3;
   AIService(this.appState, this.context);
+
+  double _floorToCentisecond(double value) => (value * 100).floorToDouble() / 100.0;
+
+  double _ceilToCentisecond(double value) => (value * 100).ceilToDouble() / 100.0;
+
+  double _roundToCentisecond(double value) => (value * 100).roundToDouble() / 100.0;
+
+  SilenceSegment? _addOrMergeSilence(
+    List<SilenceSegment> target,
+    double start,
+    double end, {
+    double gapTolerance = _kGapTolerance,
+  }) {
+    final double normalizedStart = _floorToCentisecond(start);
+    final double normalizedEnd = _ceilToCentisecond(end);
+
+    if (normalizedEnd - normalizedStart <= gapTolerance) {
+      return null;
+    }
+
+    for (int i = 0; i < target.length; i++) {
+      final existing = target[i];
+      final bool overlaps =
+          normalizedEnd >= existing.startSec - gapTolerance &&
+          normalizedStart <= existing.endSec + gapTolerance;
+
+      if (overlaps) {
+        final double mergedStart = math.min(existing.startSec, normalizedStart);
+        final double mergedEnd = math.max(existing.endSec, normalizedEnd);
+        final mergedSegment = SilenceSegment(
+          startSec: mergedStart,
+          endSec: mergedEnd,
+          duration: mergedEnd - mergedStart,
+        );
+        target[i] = mergedSegment;
+        return mergedSegment;
+      }
+    }
+
+    final newSegment = SilenceSegment(
+      startSec: normalizedStart,
+      endSec: normalizedEnd,
+      duration: normalizedEnd - normalizedStart,
+    );
+    target.add(newSegment);
+    return newSegment;
+  }
+
+  WhisperSegment _appendSilenceToSegment(WhisperSegment segment, SilenceSegment silence) {
+    final List<SilenceSegment> updatedSilences = List<SilenceSegment>.from(segment.silences);
+    _addOrMergeSilence(updatedSilences, silence.startSec, silence.endSec);
+    if (updatedSilences.isEmpty) {
+      return segment;
+    }
+
+    updatedSilences.sort((a, b) => a.startSec.compareTo(b.startSec));
+
+    double newStart = segment.startSec;
+    double newEnd = segment.endSec;
+    newStart = math.min(newStart, updatedSilences.first.startSec);
+    newEnd = math.max(newEnd, updatedSilences.last.endSec);
+
+    return segment.copyWith(
+      silences: updatedSilences,
+      startSec: newStart,
+      endSec: newEnd,
+    );
+  }
 
   // CreditService getter
   CreditService get creditService => _creditService;
@@ -641,17 +712,19 @@ class AIService {
 
       print('whisper.cpp 성공: ${enrichedSegments.length}개 세그먼트 (단어 포함=${enrichedSegments.isNotEmpty && enrichedSegments.first.words.isNotEmpty})');
       
-      // 1단계: 에너지 프로파일로 단어 경계 미세 조정 (적극적)
-      print('=== 에너지 기반 단어 경계 미세 조정 시작 (적극적) ===');
-      final energyRefinedSegments = _refineWordBoundariesWithEnergy(enrichedSegments, energyProfile);
-      print('에너지 기반 단어 경계 조정 완료');
-      
-      // 2단계: 무음 기반 세그먼트 경계 조정
-      print('=== 무음 기반 세그먼트 경계 조정 시작 ===');
-      final segmentsWithSilence = _integrateSilenceIntoSegments(energyRefinedSegments, silences);
-      print('무음 기반 세그먼트 경계 조정 완료');
-      
-      return segmentsWithSilence;
+      // 에너지 프로파일 기반 단어·무음 정규화 단계
+      print('=== 에너지 기반 단어·무음 타임라인 정규화 시작 ===');
+      final normalizedSegments = _refineWordBoundariesWithEnergy(enrichedSegments, energyProfile);
+      print('에너지 기반 단어·무음 타임라인 정규화 완료');
+
+      print('=== FFmpeg 무음 구간 병합 시작 ===');
+      final ffmpegMergedSegments = _mergeDetectedSilences(normalizedSegments, silences);
+      print('FFmpeg 무음 구간 병합 완료 (감지된 무음 ${silences.length}개)');
+
+      final continuityFixedSegments = _ensureContinuousWordTimeline(ffmpegMergedSegments);
+      print('단어 타임라인 연속성 보정 완료');
+
+      return continuityFixedSegments;
       
     } catch (e) {
       print('whisper.cpp 호출 중 오류: $e');
@@ -1378,6 +1451,251 @@ ${chunkOverviews.map((overview) => '''
       }
     }
     
+    return result;
+  }
+
+  List<WhisperSegment> _mergeDetectedSilences(
+    List<WhisperSegment> segments,
+    List<SilenceSegment> detectedSilences,
+  ) {
+    if (detectedSilences.isEmpty) {
+      return segments;
+    }
+
+    final List<SilenceSegment> normalizedSilences = [];
+    for (final silence in detectedSilences) {
+      final double normalizedStart = _floorToCentisecond(silence.startSec);
+      final double normalizedEnd = _ceilToCentisecond(silence.endSec);
+      if (normalizedEnd - normalizedStart <= _kGapTolerance) {
+        continue;
+      }
+      normalizedSilences.add(SilenceSegment(
+        startSec: normalizedStart,
+        endSec: normalizedEnd,
+        duration: normalizedEnd - normalizedStart,
+      ));
+    }
+
+    if (normalizedSilences.isEmpty) {
+      return segments;
+    }
+
+    final List<List<WordSegment>> wordsPerSegment = [
+      for (final segment in segments) List<WordSegment>.from(segment.words)
+    ];
+
+    final List<List<SilenceSegment>> silencesPerSegment = [
+      for (final segment in segments) List<SilenceSegment>.from(segment.silences)
+    ];
+
+    final List<_WordPointer> pointers = [];
+    final Map<_WordPointer, int> pointerPositions = {};
+    for (int segIdx = 0; segIdx < segments.length; segIdx++) {
+      final words = wordsPerSegment[segIdx];
+      for (int wordIdx = 0; wordIdx < words.length; wordIdx++) {
+        final pointer = _WordPointer(segIdx, wordIdx);
+        pointerPositions[pointer] = pointers.length;
+        pointers.add(pointer);
+      }
+    }
+
+    _WordPointer? findPreviousWord(double time) {
+      _WordPointer? candidate;
+      for (final pointer in pointers) {
+        final word = wordsPerSegment[pointer.segmentIndex][pointer.wordIndex];
+        if (word.endSec <= time + _kGapTolerance) {
+          if (candidate == null) {
+            candidate = pointer;
+            continue;
+          }
+          final currentCandidate =
+              wordsPerSegment[candidate.segmentIndex][candidate.wordIndex];
+          if (word.endSec > currentCandidate.endSec) {
+            candidate = pointer;
+          }
+        }
+      }
+      return candidate;
+    }
+
+    _WordPointer? findNextWord(double time) {
+      _WordPointer? candidate;
+      for (final pointer in pointers) {
+        final word = wordsPerSegment[pointer.segmentIndex][pointer.wordIndex];
+        if (word.startSec >= time - _kGapTolerance) {
+          if (candidate == null) {
+            candidate = pointer;
+            continue;
+          }
+          final currentCandidate =
+              wordsPerSegment[candidate.segmentIndex][candidate.wordIndex];
+          if (word.startSec < currentCandidate.startSec) {
+            candidate = pointer;
+          }
+        }
+      }
+      return candidate;
+    }
+
+    for (final silence in normalizedSilences) {
+      double finalSilenceStart = _roundToCentisecond(silence.startSec);
+      double finalSilenceEnd = _roundToCentisecond(silence.endSec);
+
+      final prevRef = findPreviousWord(finalSilenceStart);
+      final int prevIndex = prevRef != null ? pointerPositions[prevRef]! : -1;
+      _WordPointer? nextRef = (prevIndex + 1 < pointers.length) ? pointers[prevIndex + 1] : null;
+      nextRef ??= findNextWord(finalSilenceEnd);
+
+      if (prevRef != null) {
+        final prevWord = wordsPerSegment[prevRef.segmentIndex][prevRef.wordIndex];
+        final double minAllowedEnd = prevWord.startSec + _kMinimumWordDuration;
+        double desiredEnd = _roundToCentisecond(finalSilenceStart);
+        if (desiredEnd < minAllowedEnd) {
+          desiredEnd = _roundToCentisecond(minAllowedEnd);
+        }
+        if (desiredEnd > finalSilenceEnd - _kGapTolerance) {
+          desiredEnd = _roundToCentisecond(math.max(finalSilenceStart, finalSilenceEnd - _kGapTolerance));
+        }
+        if (desiredEnd > prevWord.endSec + _kGapTolerance) {
+          desiredEnd = _roundToCentisecond(desiredEnd);
+        }
+
+        final updatedPrev = WordSegment(
+          index: prevWord.index,
+          word: prevWord.word,
+          startSec: prevWord.startSec,
+          endSec: desiredEnd,
+          score: prevWord.score,
+        );
+        wordsPerSegment[prevRef.segmentIndex][prevRef.wordIndex] = updatedPrev;
+        finalSilenceStart = desiredEnd;
+
+        if (kDebugMode) {
+          print('   ↔ FFmpeg 무음 적용: 이전 단어 "${prevWord.word}" 종료 ${prevWord.endSec.toStringAsFixed(2)}s → ${desiredEnd.toStringAsFixed(2)}s');
+        }
+      } else {
+        finalSilenceStart = _roundToCentisecond(finalSilenceStart);
+      }
+
+      if (nextRef != null) {
+        final nextWord = wordsPerSegment[nextRef.segmentIndex][nextRef.wordIndex];
+        final double maxAllowedStart = nextWord.endSec - _kMinimumWordDuration;
+        double desiredStart = _roundToCentisecond(finalSilenceEnd);
+        if (desiredStart < finalSilenceStart) {
+          desiredStart = finalSilenceStart;
+        }
+        if (desiredStart > maxAllowedStart) {
+          desiredStart = _roundToCentisecond(maxAllowedStart);
+        }
+        if (nextWord.endSec - desiredStart < _kMinimumWordDuration) {
+          desiredStart = _roundToCentisecond(nextWord.endSec - _kMinimumWordDuration);
+        }
+        if (desiredStart < finalSilenceStart) {
+          desiredStart = finalSilenceStart;
+        }
+
+        final updatedNext = WordSegment(
+          index: nextWord.index,
+          word: nextWord.word,
+          startSec: desiredStart,
+          endSec: nextWord.endSec,
+          score: nextWord.score,
+        );
+        wordsPerSegment[nextRef.segmentIndex][nextRef.wordIndex] = updatedNext;
+        finalSilenceEnd = desiredStart;
+
+        if (kDebugMode) {
+          print('   ↔ FFmpeg 무음 적용: 다음 단어 "${nextWord.word}" 시작 ${nextWord.startSec.toStringAsFixed(2)}s → ${desiredStart.toStringAsFixed(2)}s');
+        }
+      } else {
+        finalSilenceEnd = _roundToCentisecond(finalSilenceEnd);
+      }
+
+      final double finalSilenceDuration = finalSilenceEnd - finalSilenceStart;
+      if (finalSilenceDuration <= _kGapTolerance) {
+        continue;
+      }
+
+      if (finalSilenceDuration < _kMinimumFfmpegSilenceDuration) {
+        if (prevRef != null) {
+          final prevWord = wordsPerSegment[prevRef.segmentIndex][prevRef.wordIndex];
+          final updatedPrev = WordSegment(
+            index: prevWord.index,
+            word: prevWord.word,
+            startSec: prevWord.startSec,
+            endSec: finalSilenceEnd,
+            score: prevWord.score,
+          );
+          wordsPerSegment[prevRef.segmentIndex][prevRef.wordIndex] = updatedPrev;
+        }
+
+        if (nextRef != null) {
+          final nextWord = wordsPerSegment[nextRef.segmentIndex][nextRef.wordIndex];
+          double mergedStart = _roundToCentisecond(finalSilenceEnd);
+          if (mergedStart > nextWord.endSec - _kMinimumWordDuration) {
+            mergedStart = _roundToCentisecond(nextWord.endSec - _kMinimumWordDuration);
+          }
+          if (mergedStart < nextWord.startSec) {
+            mergedStart = nextWord.startSec;
+          }
+          final alignedNext = WordSegment(
+            index: nextWord.index,
+            word: nextWord.word,
+            startSec: mergedStart,
+            endSec: nextWord.endSec,
+            score: nextWord.score,
+          );
+          wordsPerSegment[nextRef.segmentIndex][nextRef.wordIndex] = alignedNext;
+        }
+
+        if (kDebugMode) {
+          print('   ↔ FFmpeg 무음 제거(짧음): ${finalSilenceDuration.toStringAsFixed(2)}s');
+        }
+
+        continue;
+      }
+
+      int targetSegmentIndex;
+      if (prevRef != null) {
+        targetSegmentIndex = prevRef.segmentIndex;
+      } else if (nextRef != null) {
+        targetSegmentIndex = nextRef.segmentIndex;
+      } else {
+        targetSegmentIndex = segments.indexWhere(
+          (segment) => finalSilenceStart <= segment.endSec + _kGapTolerance,
+        );
+        if (targetSegmentIndex == -1) {
+          targetSegmentIndex = segments.length - 1;
+        }
+      }
+      _addOrMergeSilence(silencesPerSegment[targetSegmentIndex], finalSilenceStart, finalSilenceEnd);
+    }
+
+    final List<WhisperSegment> result = [];
+    for (int segIdx = 0; segIdx < segments.length; segIdx++) {
+      final words = wordsPerSegment[segIdx];
+      final silences = silencesPerSegment[segIdx];
+      silences.sort((a, b) => a.startSec.compareTo(b.startSec));
+
+      double segmentStart = segments[segIdx].startSec;
+      double segmentEnd = segments[segIdx].endSec;
+      if (words.isNotEmpty) {
+        segmentStart = words.first.startSec;
+        segmentEnd = words.last.endSec;
+      }
+      if (silences.isNotEmpty) {
+        segmentStart = math.min(segmentStart, silences.first.startSec);
+        segmentEnd = math.max(segmentEnd, silences.last.endSec);
+      }
+
+      result.add(segments[segIdx].copyWith(
+        words: words,
+        silences: silences,
+        startSec: segmentStart,
+        endSec: segmentEnd,
+      ));
+    }
+
     return result;
   }
 
@@ -2164,54 +2482,20 @@ ${jsonEncode(formatted)}
       return segments;
     }
 
-    double _floorToCentisecond(double value) => (value * 100).floorToDouble() / 100.0;
-    double _ceilToCentisecond(double value) => (value * 100).ceilToDouble() / 100.0;
-
-    const double minimumWordDuration = 0.01; // 10ms
-    const double gapTolerance = 1e-6;
-
+    const double minimumWordDuration = _kMinimumWordDuration;
+    const double gapTolerance = _kGapTolerance;
     final List<WhisperSegment> result = [];
     double? lastWordEndInPreviousSegment;  // 이전 세그먼트의 마지막 토큰 끝 시간
-
-    void addOrMergeSilence(List<SilenceSegment> target, double start, double end) {
-      final double normalizedStart = _floorToCentisecond(start);
-      final double normalizedEnd = _ceilToCentisecond(end);
-      if (normalizedEnd - normalizedStart <= gapTolerance) return;
-
-      for (int i = 0; i < target.length; i++) {
-        final existing = target[i];
-        final bool overlaps =
-            normalizedEnd >= existing.startSec - gapTolerance &&
-            normalizedStart <= existing.endSec + gapTolerance;
-
-        if (overlaps) {
-          final double mergedStart = math.min(existing.startSec, normalizedStart);
-          final double mergedEnd = math.max(existing.endSec, normalizedEnd);
-          target[i] = SilenceSegment(
-            startSec: mergedStart,
-            endSec: mergedEnd,
-            duration: mergedEnd - mergedStart,
-          );
-          return;
-        }
-      }
-
-      target.add(SilenceSegment(
-        startSec: normalizedStart,
-        endSec: normalizedEnd,
-        duration: normalizedEnd - normalizedStart,
-      ));
-    }
+    final List<SilenceSegment> integratedSilences = [];
 
     for (final segment in segments) {
       if (segment.words.isEmpty) {
         result.add(segment);
+        lastWordEndInPreviousSegment = segment.endSec;
         continue;
       }
 
       final refinedWords = <WordSegment>[];
-      final refinedSilences = <SilenceSegment>[];
-      refinedSilences.addAll(segment.silences);
 
       final double segmentStartRounded = _floorToCentisecond(segment.startSec);
       final double segmentEndRounded = _ceilToCentisecond(segment.endSec);
@@ -2222,9 +2506,10 @@ ${jsonEncode(formatted)}
         final double approximateStart = word.startSec;
         final double approximateEnd = word.endSec;
 
+        final double baselineStart = lastWordEndInPreviousSegment ?? segmentStartRounded;
         final double previousTokenEnd = refinedWords.isNotEmpty
             ? refinedWords.last.endSec
-            : (lastWordEndInPreviousSegment ?? segmentStartRounded);
+            : baselineStart;
 
         final double actualStart = _findActualWordStart(
           approximateStart,
@@ -2237,17 +2522,37 @@ ${jsonEncode(formatted)}
           i < segment.words.length - 1 ? segment.words[i + 1].startSec : null,
         );
 
-        double normalizedStart = _floorToCentisecond(actualStart);
+        double normalizedStart = refinedWords.isEmpty
+            ? _floorToCentisecond(math.max(actualStart, baselineStart))
+            : previousTokenEnd;
 
-        if (normalizedStart < previousTokenEnd - gapTolerance) {
+        if (refinedWords.isEmpty) {
+          if (lastWordEndInPreviousSegment != null) {
+            normalizedStart = lastWordEndInPreviousSegment!;
+          } else {
+            normalizedStart = segmentStartRounded;
+          }
+        }
+
+        if (refinedWords.isNotEmpty && normalizedStart > previousTokenEnd + gapTolerance) {
+          final double gapStart = previousTokenEnd;
+          final double gapEnd = normalizedStart;
+          if (gapEnd - gapStart > gapTolerance) {
+            integratedSilences.add(SilenceSegment(
+              startSec: gapStart,
+              endSec: gapEnd,
+              duration: gapEnd - gapStart,
+            ));
+          }
+          if (kDebugMode) {
+            print('   ↔ 간격 제거: ${gapStart.toStringAsFixed(2)}s ~ ${gapEnd.toStringAsFixed(2)}s → ${gapStart.toStringAsFixed(2)}s (무음 통합)');
+          }
+          normalizedStart = gapStart;
+        }
+
+        if (normalizedStart < previousTokenEnd) {
           normalizedStart = previousTokenEnd;
         }
-
-        if (normalizedStart > previousTokenEnd + gapTolerance) {
-          addOrMergeSilence(refinedSilences, previousTokenEnd, normalizedStart);
-        }
-
-        normalizedStart = math.max(normalizedStart, previousTokenEnd);
 
         double normalizedEnd = _ceilToCentisecond(actualEnd);
         if (normalizedEnd < normalizedStart + minimumWordDuration) {
@@ -2255,8 +2560,19 @@ ${jsonEncode(formatted)}
         }
 
         if (i == segment.words.length - 1 && normalizedEnd < segmentEndRounded - gapTolerance) {
-          addOrMergeSilence(refinedSilences, normalizedEnd, segmentEndRounded);
-          normalizedEnd = segmentEndRounded;
+          final double gapStart = normalizedEnd;
+          final double gapEnd = segmentEndRounded;
+          if (gapEnd - gapStart > gapTolerance) {
+            integratedSilences.add(SilenceSegment(
+              startSec: gapStart,
+              endSec: gapEnd,
+              duration: gapEnd - gapStart,
+            ));
+          }
+          if (kDebugMode) {
+            print('   ↔ 세그먼트 말미 여유: ${gapStart.toStringAsFixed(2)}s ~ ${gapEnd.toStringAsFixed(2)}s → ${gapEnd.toStringAsFixed(2)}s (무음 통합)');
+          }
+          normalizedEnd = gapEnd;
         } else {
           normalizedEnd = math.min(normalizedEnd, segmentEndRounded);
         }
@@ -2285,28 +2601,32 @@ ${jsonEncode(formatted)}
           );
         }
 
-        // 다음 토큰과의 간격이 있을 경우 무음 추가를 준비 (while 루프 이후 처리)
+        // 다음 토큰과의 간격 정보 (무음 기록 없음)
         final double nextApproximateStart =
             (i < segment.words.length - 1) ? segment.words[i + 1].startSec : segmentEndRounded;
         final double nextStartCandidate = _floorToCentisecond(nextApproximateStart);
         if (normalizedEnd + gapTolerance < nextStartCandidate && i < segment.words.length - 1) {
-          addOrMergeSilence(refinedSilences, normalizedEnd, nextStartCandidate);
+          final double gapStart = normalizedEnd;
+          final double gapEnd = nextStartCandidate;
+          if (gapEnd - gapStart > gapTolerance) {
+            integratedSilences.add(SilenceSegment(
+              startSec: gapStart,
+              endSec: gapEnd,
+              duration: gapEnd - gapStart,
+            ));
+          }
+          if (kDebugMode) {
+            print('   ↔ 단어 간 여유 제거: ${gapStart.toStringAsFixed(2)}s ~ ${gapEnd.toStringAsFixed(2)}s → ${gapStart.toStringAsFixed(2)}s (무음 통합)');
+          }
+          normalizedEnd = gapStart;
         }
       }
-
-      refinedSilences.sort((a, b) => a.startSec.compareTo(b.startSec));
-
       double segmentStartForCopy = refinedWords.first.startSec;
       double segmentEndForCopy = refinedWords.last.endSec;
 
-      if (refinedSilences.isNotEmpty) {
-        segmentStartForCopy = math.min(segmentStartForCopy, refinedSilences.first.startSec);
-        segmentEndForCopy = math.max(segmentEndForCopy, refinedSilences.last.endSec);
-      }
-
       result.add(segment.copyWith(
         words: refinedWords,
-        silences: refinedSilences,
+        silences: const [],
         startSec: segmentStartForCopy,
         endSec: segmentEndForCopy,
       ));
@@ -2314,10 +2634,14 @@ ${jsonEncode(formatted)}
       lastWordEndInPreviousSegment = segmentEndForCopy;
     }
 
+    if (kDebugMode && integratedSilences.isNotEmpty) {
+      print('총 ${integratedSilences.length}개의 에너지 기반 무음을 단어에 통합했습니다.');
+    }
     return result;
   }
 
-  // 무음 구간 기반 세그먼트 경계 조정 (방식 2)
+  // 무음 구간 기반 세그먼트 경계 조정 (과거 로직)
+  // ignore: unused_element
   List<WhisperSegment> _integrateSilenceIntoSegments(
     List<WhisperSegment> segments,
     List<SilenceSegment> allSilences,
@@ -2752,6 +3076,84 @@ ${jsonEncode(formatted)}
     return suffixes.contains(token);
   }
 
+  bool _hasSilenceCoveringGap(
+    List<SilenceSegment> silences,
+    double gapStart,
+    double gapEnd,
+  ) {
+    for (final silence in silences) {
+      if (silence.endSec <= gapStart + _kGapTolerance) {
+        continue;
+      }
+      if (silence.startSec >= gapEnd - _kGapTolerance) {
+        break;
+      }
+      final bool coversStart = silence.startSec <= gapStart + _kGapTolerance;
+      final bool coversEnd = silence.endSec >= gapEnd - _kGapTolerance;
+      if (coversStart && coversEnd) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  List<WhisperSegment> _ensureContinuousWordTimeline(
+    List<WhisperSegment> segments,
+  ) {
+    final List<SilenceSegment> allSilences = [];
+    for (final segment in segments) {
+      allSilences.addAll(segment.silences);
+    }
+    allSilences.sort((a, b) => a.startSec.compareTo(b.startSec));
+
+    final List<WhisperSegment> adjustedSegments = [];
+    double? lastWordEnd;
+
+    for (final segment in segments) {
+      if (segment.words.isEmpty) {
+        adjustedSegments.add(segment);
+        continue;
+      }
+
+      final List<WordSegment> adjustedWords = [];
+
+      for (int i = 0; i < segment.words.length; i++) {
+        final word = segment.words[i];
+        double start = word.startSec;
+
+        if (lastWordEnd != null) {
+          if (start - lastWordEnd! > _kGapTolerance &&
+              !_hasSilenceCoveringGap(allSilences, lastWordEnd!, start)) {
+            start = lastWordEnd!;
+          }
+        }
+
+        double end = word.endSec;
+        if (end < start + _kMinimumWordDuration) {
+          end = start + _kMinimumWordDuration;
+        }
+
+        final adjustedWord = WordSegment(
+          index: word.index,
+          word: word.word,
+          startSec: start,
+          endSec: end,
+          score: word.score,
+        );
+        adjustedWords.add(adjustedWord);
+        lastWordEnd = end;
+      }
+
+      adjustedSegments.add(segment.copyWith(
+        words: adjustedWords,
+        startSec: adjustedWords.first.startSec,
+        endSec: math.max(segment.endSec, adjustedWords.last.endSec),
+      ));
+    }
+
+    return adjustedSegments;
+  }
+
 }
 
 // 시간 구간 타입
@@ -2783,4 +3185,11 @@ class _TimeRegion {
     this.originalSegmentId,
     this.originalSegmentText,
   });
+}
+
+class _WordPointer {
+  final int segmentIndex;
+  final int wordIndex;
+
+  const _WordPointer(this.segmentIndex, this.wordIndex);
 }
