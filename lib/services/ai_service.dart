@@ -45,6 +45,59 @@ class AIService {
 
   double _roundToCentisecond(double value) => (value * 100).roundToDouble() / 100.0;
 
+  // 무음을 WordSegment로 추가/병합 (새로운 방식)
+  WordSegment? _addOrMergeSilenceAsWord(
+    List<WordSegment> target,
+    double start,
+    double end, {
+    double gapTolerance = _kGapTolerance,
+  }) {
+    final double normalizedStart = _floorToCentisecond(start);
+    final double normalizedEnd = _ceilToCentisecond(end);
+
+    if (normalizedEnd - normalizedStart <= gapTolerance) {
+      return null;
+    }
+
+    // 기존 무음과 병합 가능한지 확인
+    for (int i = 0; i < target.length; i++) {
+      final existing = target[i];
+      if (!existing.isSilence) continue; // 단어는 건너뛰기
+      
+      final bool overlaps =
+          normalizedEnd >= existing.startSec - gapTolerance &&
+          normalizedStart <= existing.endSec + gapTolerance;
+
+      if (overlaps) {
+        final double mergedStart = math.min(existing.startSec, normalizedStart);
+        final double mergedEnd = math.max(existing.endSec, normalizedEnd);
+        final mergedSegment = WordSegment(
+          index: existing.index,
+          word: '',
+          startSec: mergedStart,
+          endSec: mergedEnd,
+          score: 1.0,
+          isSilence: true,
+        );
+        target[i] = mergedSegment;
+        return mergedSegment;
+      }
+    }
+
+    // 새 무음 추가
+    final newSegment = WordSegment(
+      index: target.length,
+      word: '',
+      startSec: normalizedStart,
+      endSec: normalizedEnd,
+      score: 1.0,
+      isSilence: true,
+    );
+    target.add(newSegment);
+    return newSegment;
+  }
+  
+  // 구버전 호환용 (SilenceSegment 기반) - 점진적 마이그레이션용
   SilenceSegment? _addOrMergeSilence(
     List<SilenceSegment> target,
     double start,
@@ -1726,22 +1779,37 @@ ${chunkOverviews.map((overview) => '''
     for (int segIdx = 0; segIdx < segments.length; segIdx++) {
       final words = wordsPerSegment[segIdx];
       final silences = silencesPerSegment[segIdx];
-      silences.sort((a, b) => a.startSec.compareTo(b.startSec));
+      
+      // silences를 WordSegment로 변환하여 words에 통합
+      final List<WordSegment> combinedWords = List<WordSegment>.from(words);
+      for (final silence in silences) {
+        combinedWords.add(WordSegment(
+          index: combinedWords.length, // 임시 인덱스
+          word: '',
+          startSec: silence.startSec,
+          endSec: silence.endSec,
+          score: 1.0,
+          isSilence: true,
+        ));
+      }
+      
+      // 시간순 정렬
+      combinedWords.sort((a, b) => a.startSec.compareTo(b.startSec));
+      
+      // 인덱스 재조정
+      for (int i = 0; i < combinedWords.length; i++) {
+        combinedWords[i] = combinedWords[i].copyWith(index: i);
+      }
 
       double segmentStart = segments[segIdx].startSec;
       double segmentEnd = segments[segIdx].endSec;
-      if (words.isNotEmpty) {
-        segmentStart = words.first.startSec;
-        segmentEnd = words.last.endSec;
-      }
-      if (silences.isNotEmpty) {
-        segmentStart = math.min(segmentStart, silences.first.startSec);
-        segmentEnd = math.max(segmentEnd, silences.last.endSec);
+      if (combinedWords.isNotEmpty) {
+        segmentStart = combinedWords.first.startSec;
+        segmentEnd = combinedWords.last.endSec;
       }
 
       result.add(segments[segIdx].copyWith(
-        words: words,
-        silences: silences,
+        words: combinedWords,
         startSec: segmentStart,
         endSec: segmentEnd,
       ));
