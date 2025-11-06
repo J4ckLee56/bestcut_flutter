@@ -641,10 +641,14 @@ class AIService {
 
       print('whisper.cpp 성공: ${enrichedSegments.length}개 세그먼트 (단어 포함=${enrichedSegments.isNotEmpty && enrichedSegments.first.words.isNotEmpty})');
       
-      // WhisperX 결과를 신뢰 (에너지 조정 비활성화 - 단어 겹침 문제)
-      // 무음 기반 세그먼트 경계만 조정
+      // 1단계: 에너지 프로파일로 단어 경계 미세 조정 (보수적)
+      print('=== 에너지 기반 단어 경계 미세 조정 시작 (보수적) ===');
+      final energyRefinedSegments = _refineWordBoundariesWithEnergy(enrichedSegments, energyProfile);
+      print('에너지 기반 단어 경계 조정 완료');
+      
+      // 2단계: 무음 기반 세그먼트 경계 조정
       print('=== 무음 기반 세그먼트 경계 조정 시작 ===');
-      final segmentsWithSilence = _integrateSilenceIntoSegments(enrichedSegments, silences);
+      final segmentsWithSilence = _integrateSilenceIntoSegments(energyRefinedSegments, silences);
       print('무음 기반 세그먼트 경계 조정 완료');
       
       return segmentsWithSilence;
@@ -2179,14 +2183,21 @@ ${jsonEncode(formatted)}
     return result;
   }
 
-  // 에너지 프로파일에서 실제 단어 시작 지점 찾기
-  double _findActualWordStart(double approximateStart, List<AudioEnergyFrame> energyProfile) {
-    const double searchWindow = 0.3; // 앞뒤로 300ms 탐색
-    const double voiceThreshold = -40.0; // -40dB 이상은 음성으로 판단
+  // 에너지 프로파일에서 실제 단어 시작 지점 찾기 (보수적 조정)
+  double _findActualWordStart(
+    double approximateStart, 
+    List<AudioEnergyFrame> energyProfile,
+    double? previousWordEnd,  // 이전 단어 끝 시간
+  ) {
+    // 보수적 탐색: 시작점은 약간만 앞, 주로 뒤로 탐색
+    const double searchBefore = 0.05; // 앞으로 50ms만
+    const double searchAfter = 0.15;  // 뒤로 150ms
+    const double voiceThreshold = -40.0; // -40dB 이상은 음성
 
-    // 탐색 범위
-    final searchStart = approximateStart - searchWindow;
-    final searchEnd = approximateStart + searchWindow;
+    // 이전 단어와 겹치지 않도록 최소 시작 시간 설정
+    final minStart = previousWordEnd ?? 0.0;
+    final searchStart = (approximateStart - searchBefore).clamp(minStart, double.infinity);
+    final searchEnd = approximateStart + searchAfter;
 
     // 탐색 범위 내의 프레임들
     final relevantFrames = energyProfile.where((frame) =>
@@ -2195,24 +2206,31 @@ ${jsonEncode(formatted)}
 
     if (relevantFrames.isEmpty) return approximateStart;
 
-    // 음성이 시작되는 첫 지점 찾기 (에너지가 임계값 이상 올라가는 지점)
+    // 음성이 시작되는 첫 지점 찾기
     for (final frame in relevantFrames) {
       if (frame.rmsLevel >= voiceThreshold) {
-        return frame.timeSec;
+        return frame.timeSec.clamp(minStart, double.infinity);
       }
     }
 
     return approximateStart; // 찾지 못하면 원래 값 유지
   }
 
-  // 에너지 프로파일에서 실제 단어 끝 지점 찾기
-  double _findActualWordEnd(double approximateEnd, List<AudioEnergyFrame> energyProfile) {
-    const double searchWindow = 0.3; // 앞뒤로 300ms 탐색
-    const double voiceThreshold = -40.0; // -40dB 이상은 음성으로 판단
+  // 에너지 프로파일에서 실제 단어 끝 지점 찾기 (보수적 조정)
+  double _findActualWordEnd(
+    double approximateEnd, 
+    List<AudioEnergyFrame> energyProfile,
+    double? nextWordStart,  // 다음 단어 시작 시간
+  ) {
+    // 보수적 탐색: 끝점은 주로 앞, 약간만 뒤로 탐색
+    const double searchBefore = 0.15; // 앞으로 150ms
+    const double searchAfter = 0.05;  // 뒤로 50ms만
+    const double voiceThreshold = -40.0; // -40dB 이상은 음성
 
-    // 탐색 범위
-    final searchStart = approximateEnd - searchWindow;
-    final searchEnd = approximateEnd + searchWindow;
+    // 다음 단어와 겹치지 않도록 최대 끝 시간 설정
+    final maxEnd = nextWordStart ?? double.infinity;
+    final searchStart = approximateEnd - searchBefore;
+    final searchEnd = (approximateEnd + searchAfter).clamp(0.0, maxEnd);
 
     // 탐색 범위 내의 프레임들 (역순으로)
     final relevantFrames = energyProfile.where((frame) =>
@@ -2221,17 +2239,17 @@ ${jsonEncode(formatted)}
 
     if (relevantFrames.isEmpty) return approximateEnd;
 
-    // 음성이 끝나는 지점 찾기 (에너지가 임계값 이하로 떨어지는 지점)
+    // 음성이 끝나는 지점 찾기 (마지막 음성 프레임)
     for (final frame in relevantFrames) {
       if (frame.rmsLevel >= voiceThreshold) {
-        return frame.timeSec;
+        return frame.timeSec.clamp(0.0, maxEnd);
       }
     }
 
     return approximateEnd; // 찾지 못하면 원래 값 유지
   }
 
-  // 에너지 프로파일 기반 단어 경계 미세 조정
+  // 에너지 프로파일 기반 단어 경계 미세 조정 (보수적)
   List<WhisperSegment> _refineWordBoundariesWithEnergy(
     List<WhisperSegment> segments,
     List<AudioEnergyFrame> energyProfile,
@@ -2251,25 +2269,35 @@ ${jsonEncode(formatted)}
 
       final refinedWords = <WordSegment>[];
       
-      for (final word in segment.words) {
+      for (int i = 0; i < segment.words.length; i++) {
+        final word = segment.words[i];
+        
         // WhisperX가 제공한 대략적인 시간
         final approximateStart = word.startSec;
         final approximateEnd = word.endSec;
 
-        // 에너지 기반으로 실제 발화 시작/끝 찾기 (±0.3초 범위)
-        final actualStart = _findActualWordStart(approximateStart, energyProfile);
-        final actualEnd = _findActualWordEnd(approximateEnd, energyProfile);
+        // 이전/다음 단어 정보
+        final previousWordEnd = i > 0 ? segment.words[i - 1].endSec : null;
+        final nextWordStart = i < segment.words.length - 1 ? segment.words[i + 1].startSec : null;
+
+        // 에너지 기반으로 실제 발화 시작/끝 찾기 (보수적 범위)
+        final actualStart = _findActualWordStart(approximateStart, energyProfile, previousWordEnd);
+        final actualEnd = _findActualWordEnd(approximateEnd, energyProfile, nextWordStart);
+
+        // 시작이 끝보다 늦으면 안됨
+        final finalStart = actualStart;
+        final finalEnd = actualEnd < finalStart ? finalStart + 0.01 : actualEnd;
 
         refinedWords.add(WordSegment(
           index: word.index,
           word: word.word,
-          startSec: actualStart,
-          endSec: actualEnd,
+          startSec: finalStart,
+          endSec: finalEnd,
           score: word.score,
         ));
 
-        if (kDebugMode && ((actualStart - approximateStart).abs() > 0.05 || (actualEnd - approximateEnd).abs() > 0.05)) {
-          print('  단어 "${word.word}": ${approximateStart.toStringAsFixed(2)}-${approximateEnd.toStringAsFixed(2)}s → ${actualStart.toStringAsFixed(2)}-${actualEnd.toStringAsFixed(2)}s');
+        if (kDebugMode && ((finalStart - approximateStart).abs() > 0.03 || (finalEnd - approximateEnd).abs() > 0.03)) {
+          print('  단어 "${word.word}": ${approximateStart.toStringAsFixed(2)}-${approximateEnd.toStringAsFixed(2)}s → ${finalStart.toStringAsFixed(2)}-${finalEnd.toStringAsFixed(2)}s');
         }
       }
 
