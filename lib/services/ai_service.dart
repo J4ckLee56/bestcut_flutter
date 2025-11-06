@@ -2171,7 +2171,37 @@ ${jsonEncode(formatted)}
     const double gapTolerance = 1e-6;
 
     final List<WhisperSegment> result = [];
-    double? lastWordEndInPreviousSegment;  // 이전 세그먼트의 마지막 단어 끝 시간
+    double? lastWordEndInPreviousSegment;  // 이전 세그먼트의 마지막 토큰 끝 시간
+
+    void addOrMergeSilence(List<SilenceSegment> target, double start, double end) {
+      final double normalizedStart = _floorToCentisecond(start);
+      final double normalizedEnd = _ceilToCentisecond(end);
+      if (normalizedEnd - normalizedStart <= gapTolerance) return;
+
+      for (int i = 0; i < target.length; i++) {
+        final existing = target[i];
+        final bool overlaps =
+            normalizedEnd >= existing.startSec - gapTolerance &&
+            normalizedStart <= existing.endSec + gapTolerance;
+
+        if (overlaps) {
+          final double mergedStart = math.min(existing.startSec, normalizedStart);
+          final double mergedEnd = math.max(existing.endSec, normalizedEnd);
+          target[i] = SilenceSegment(
+            startSec: mergedStart,
+            endSec: mergedEnd,
+            duration: mergedEnd - mergedStart,
+          );
+          return;
+        }
+      }
+
+      target.add(SilenceSegment(
+        startSec: normalizedStart,
+        endSec: normalizedEnd,
+        duration: normalizedEnd - normalizedStart,
+      ));
+    }
 
     for (final segment in segments) {
       if (segment.words.isEmpty) {
@@ -2180,17 +2210,22 @@ ${jsonEncode(formatted)}
       }
 
       final refinedWords = <WordSegment>[];
+      final refinedSilences = <SilenceSegment>[];
+      refinedSilences.addAll(segment.silences);
+
       final double segmentStartRounded = _floorToCentisecond(segment.startSec);
       final double segmentEndRounded = _ceilToCentisecond(segment.endSec);
-      
+
       for (int i = 0; i < segment.words.length; i++) {
         final word = segment.words[i];
-        
-        // WhisperX가 제공한 대략적인 시간
-        final approximateStart = word.startSec;
-        final approximateEnd = word.endSec;
 
-        // 에너지 기반으로 실제 발화 시작/끝 찾기 (적극적 범위)
+        final double approximateStart = word.startSec;
+        final double approximateEnd = word.endSec;
+
+        final double previousTokenEnd = refinedWords.isNotEmpty
+            ? refinedWords.last.endSec
+            : (lastWordEndInPreviousSegment ?? segmentStartRounded);
+
         final double actualStart = _findActualWordStart(
           approximateStart,
           energyProfile,
@@ -2202,45 +2237,28 @@ ${jsonEncode(formatted)}
           i < segment.words.length - 1 ? segment.words[i + 1].startSec : null,
         );
 
-        // 기초 지속시간 계산 (최소 10ms 보장)
-        double desiredDuration = math.max(actualEnd - actualStart, minimumWordDuration);
+        double normalizedStart = _floorToCentisecond(actualStart);
 
-        // 시작 시점 정규화 (센티초 단위) - 첫 단어는 세그먼트 시작에 맞춤
-        double normalizedStart;
-        if (refinedWords.isEmpty) {
-          normalizedStart = math.max(segmentStartRounded, _floorToCentisecond(actualStart));
-        } else {
-          normalizedStart = refinedWords.last.endSec;
-
-          // 이전 단어와의 겹침/간격 조정
-          final double previousEnd = refinedWords.last.endSec;
-
-          if (actualStart > previousEnd + gapTolerance) {
-            // 이전 단어의 끝을 현재 단어 시작으로 확장하여 공백 제거
-            final lastWord = refinedWords.removeLast();
-            final adjustedPrevious = WordSegment(
-              index: lastWord.index,
-              word: lastWord.word,
-              startSec: lastWord.startSec,
-              endSec: _ceilToCentisecond(actualStart),
-              score: lastWord.score,
-            );
-            refinedWords.add(adjustedPrevious);
-            normalizedStart = adjustedPrevious.endSec;
-          } else if (actualStart < previousEnd - gapTolerance) {
-            normalizedStart = previousEnd;
-          }
+        if (normalizedStart < previousTokenEnd - gapTolerance) {
+          normalizedStart = previousTokenEnd;
         }
 
-        // 종료 시점 정규화 (센티초 단위)
-        double normalizedEnd = math.max(
-          normalizedStart + minimumWordDuration,
-          math.max(_ceilToCentisecond(actualEnd), _ceilToCentisecond(normalizedStart + desiredDuration)),
-        );
+        if (normalizedStart > previousTokenEnd + gapTolerance) {
+          addOrMergeSilence(refinedSilences, previousTokenEnd, normalizedStart);
+        }
 
-        // 마지막 단어는 세그먼트 끝에 정렬
-        if (i == segment.words.length - 1 && normalizedEnd < segmentEndRounded) {
+        normalizedStart = math.max(normalizedStart, previousTokenEnd);
+
+        double normalizedEnd = _ceilToCentisecond(actualEnd);
+        if (normalizedEnd < normalizedStart + minimumWordDuration) {
+          normalizedEnd = normalizedStart + minimumWordDuration;
+        }
+
+        if (i == segment.words.length - 1 && normalizedEnd < segmentEndRounded - gapTolerance) {
+          addOrMergeSilence(refinedSilences, normalizedEnd, segmentEndRounded);
           normalizedEnd = segmentEndRounded;
+        } else {
+          normalizedEnd = math.min(normalizedEnd, segmentEndRounded);
         }
 
         refinedWords.add(WordSegment(
@@ -2251,33 +2269,49 @@ ${jsonEncode(formatted)}
           score: word.score,
         ));
 
-        // 모든 단어 조정 로그 출력
         if (kDebugMode) {
           final startDiff = (normalizedStart - approximateStart).abs();
           final endDiff = (normalizedEnd - approximateEnd).abs();
           final adjustmentMark = (startDiff > 0.01 || endDiff > 0.01) ? '🔧' : '✓';
           final prevInfo = refinedWords.length > 1
               ? ' (prev=${refinedWords[refinedWords.length - 2].endSec.toStringAsFixed(2)})'
-              : '';
+              : (lastWordEndInPreviousSegment != null
+                  ? ' (prev=${lastWordEndInPreviousSegment!.toStringAsFixed(2)})'
+                  : '');
           print(
             '  $adjustmentMark 단어 #${i + 1} "${word.word}": '
             '${approximateStart.toStringAsFixed(2)}-${approximateEnd.toStringAsFixed(2)}s '
             '→ ${normalizedStart.toStringAsFixed(2)}-${normalizedEnd.toStringAsFixed(2)}s$prevInfo',
           );
         }
+
+        // 다음 토큰과의 간격이 있을 경우 무음 추가를 준비 (while 루프 이후 처리)
+        final double nextApproximateStart =
+            (i < segment.words.length - 1) ? segment.words[i + 1].startSec : segmentEndRounded;
+        final double nextStartCandidate = _floorToCentisecond(nextApproximateStart);
+        if (normalizedEnd + gapTolerance < nextStartCandidate && i < segment.words.length - 1) {
+          addOrMergeSilence(refinedSilences, normalizedEnd, nextStartCandidate);
+        }
       }
 
-      // 조정된 단어들로 세그먼트 재구성
+      refinedSilences.sort((a, b) => a.startSec.compareTo(b.startSec));
+
+      double segmentStartForCopy = refinedWords.first.startSec;
+      double segmentEndForCopy = refinedWords.last.endSec;
+
+      if (refinedSilences.isNotEmpty) {
+        segmentStartForCopy = math.min(segmentStartForCopy, refinedSilences.first.startSec);
+        segmentEndForCopy = math.max(segmentEndForCopy, refinedSilences.last.endSec);
+      }
+
       result.add(segment.copyWith(
         words: refinedWords,
-        startSec: refinedWords.first.startSec,
-        endSec: refinedWords.last.endSec,
+        silences: refinedSilences,
+        startSec: segmentStartForCopy,
+        endSec: segmentEndForCopy,
       ));
-      
-      // 다음 세그먼트를 위해 현재 세그먼트 마지막 단어의 끝 시간 저장
-      if (refinedWords.isNotEmpty) {
-        lastWordEndInPreviousSegment = refinedWords.last.endSec;
-      }
+
+      lastWordEndInPreviousSegment = segmentEndForCopy;
     }
 
     return result;

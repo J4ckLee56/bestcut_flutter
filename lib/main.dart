@@ -689,6 +689,19 @@ class _BestCutHomePageState extends State<BestCutHomePage> {
                       _videoService.seekTo(targetPosition);
                     }
                   },
+                  onSilenceTap: (segmentIndex, SilenceSegment silence) {
+                    if (segmentIndex >= 0 && segmentIndex < _appState.segments.length) {
+                      final targetPosition =
+                          Duration(milliseconds: (silence.startSec * 1000).round());
+                      if (kDebugMode) {
+                        print(
+                          '🎯 무음 이동: segmentIndex=$segmentIndex, '
+                          'range=${silence.startSec.toStringAsFixed(2)}-${silence.endSec.toStringAsFixed(2)}s',
+                        );
+                      }
+                      _videoService.seekTo(targetPosition);
+                    }
+                  },
                   onSegmentSecondaryTap: (index) {
                     // 요약 세그먼트 토글 로직
                     final currentSegments = _appState.segments;
