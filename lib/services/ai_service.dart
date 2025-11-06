@@ -2366,7 +2366,7 @@ ${jsonEncode(formatted)}
       ffmpegPath,
       [
         '-i', audioPath,
-        '-af', 'silencedetect=n=-40dB:d=0.3', // -40dB 이하, 0.3초 이상 (보수적)
+        '-af', 'silencedetect=n=-30dB:d=0.3', // -30dB 이하, 0.3초 이상
         '-f', 'null',
         '-'
       ],
