@@ -178,11 +178,6 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     // 단어 또는 무음이 선택되어 있어야 함
     if (_selectedWordSegmentIndex != null && _selectedWordIndex != null) {
       // 단어 기준 분할
-      if (_selectedWordIndex == 0) {
-        _showSnackBar('첫 번째 단어는 분할 기준이 될 수 없습니다.');
-        return;
-      }
-      
       final success = widget.appState.splitSegmentAtWord(
         _selectedWordSegmentIndex!,
         _selectedWordIndex!,
@@ -193,7 +188,11 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
           _selectedWordSegmentIndex = null;
           _selectedWordIndex = null;
         });
-        _showSnackBar('✂️ 세그먼트 분할 완료');
+        if (_selectedWordIndex == 0) {
+          _showSnackBar('✂️ 세그먼트 분할 완료 (무음만 있는 세그먼트 생성)');
+        } else {
+          _showSnackBar('✂️ 세그먼트 분할 완료');
+        }
       } else {
         _showSnackBar('❌ 세그먼트 분할 실패');
       }

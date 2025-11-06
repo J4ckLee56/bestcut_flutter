@@ -453,7 +453,7 @@ class AppState extends ChangeNotifier {
     }
     
     final segment = _segments[segmentIndex];
-    if (wordIndex <= 0 || wordIndex >= segment.words.length) {
+    if (wordIndex < 0 || wordIndex >= segment.words.length) {
       print('❌ 잘못된 단어 인덱스: $wordIndex (세그먼트 단어 수: ${segment.words.length})');
       return false;
     }
@@ -466,8 +466,11 @@ class AppState extends ChangeNotifier {
     final secondWords = segment.words.sublist(wordIndex);
     final secondSilences = <SilenceSegment>[];
     
-    // 무음 구간 재분배: 첫 번째 세그먼트 끝시간 기준으로 나누기
-    final splitTime = firstWords.last.endSec;
+    // 무음 구간 재분배: 분할 시간 결정
+    // firstWords가 비어있으면 세그먼트 시작부터, 아니면 마지막 단어 끝까지
+    final splitTime = firstWords.isEmpty 
+        ? segment.startSec 
+        : firstWords.last.endSec;
     for (final silence in segment.silences) {
       if (silence.endSec <= splitTime) {
         firstSilences.add(silence);
@@ -489,19 +492,20 @@ class AppState extends ChangeNotifier {
     }
     
     // 첫 번째 세그먼트 생성 (기존 ID 유지)
+    // 단어가 없으면 무음만 있는 세그먼트
     final firstSegment = WhisperSegment(
       id: segment.id,
       startSec: segment.startSec,
-      endSec: splitTime,
-      text: firstWords.map((w) => w.word).join(' '),
+      endSec: firstWords.isEmpty ? splitTime : splitTime,
+      text: firstWords.isEmpty ? '' : firstWords.map((w) => w.word).join(' '),
       words: firstWords,
       silences: firstSilences,
       isSummary: segment.isSummary,
     );
     
-    // 두 번째 세그먼트 생성 (새 ID: 기존 ID + 0.5)
+    // 두 번째 세그먼트 생성 (새 ID: 기존 ID + 1)
     final secondSegment = WhisperSegment(
-      id: segment.id + 1, // 새 ID는 다음 정수로
+      id: segment.id + 1,
       startSec: splitTime,
       endSec: segment.endSec,
       text: secondWords.map((w) => w.word).join(' '),
