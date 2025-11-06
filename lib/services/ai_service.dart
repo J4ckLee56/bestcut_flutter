@@ -2164,6 +2164,12 @@ ${jsonEncode(formatted)}
       return segments;
     }
 
+    double _floorToCentisecond(double value) => (value * 100).floorToDouble() / 100.0;
+    double _ceilToCentisecond(double value) => (value * 100).ceilToDouble() / 100.0;
+
+    const double minimumWordDuration = 0.01; // 10ms
+    const double gapTolerance = 1e-6;
+
     final List<WhisperSegment> result = [];
     double? lastWordEndInPreviousSegment;  // 이전 세그먼트의 마지막 단어 끝 시간
 
@@ -2174,6 +2180,8 @@ ${jsonEncode(formatted)}
       }
 
       final refinedWords = <WordSegment>[];
+      final double segmentStartRounded = _floorToCentisecond(segment.startSec);
+      final double segmentEndRounded = _ceilToCentisecond(segment.endSec);
       
       for (int i = 0; i < segment.words.length; i++) {
         final word = segment.words[i];
@@ -2182,37 +2190,80 @@ ${jsonEncode(formatted)}
         final approximateStart = word.startSec;
         final approximateEnd = word.endSec;
 
-        // 이전 단어 정보: 같은 세그먼트 내 또는 이전 세그먼트의 마지막 단어
-        final previousWordEnd = i > 0 
-            ? refinedWords[i - 1].endSec  // 같은 세그먼트 내
-            : lastWordEndInPreviousSegment;  // 이전 세그먼트의 마지막 단어
-        
-        // 다음 단어 정보: 아직 조정 안 된 원본 시간 사용 (참고용)
-        final nextWordStart = i < segment.words.length - 1 ? segment.words[i + 1].startSec : null;
-
         // 에너지 기반으로 실제 발화 시작/끝 찾기 (적극적 범위)
-        final actualStart = _findActualWordStart(approximateStart, energyProfile, previousWordEnd);
-        final actualEnd = _findActualWordEnd(approximateEnd, energyProfile, nextWordStart);
+        final double actualStart = _findActualWordStart(
+          approximateStart,
+          energyProfile,
+          refinedWords.isNotEmpty ? refinedWords.last.endSec : lastWordEndInPreviousSegment,
+        );
+        final double actualEnd = _findActualWordEnd(
+          approximateEnd,
+          energyProfile,
+          i < segment.words.length - 1 ? segment.words[i + 1].startSec : null,
+        );
 
-        // 시작이 끝보다 늦거나 같으면 안됨 (최소 10ms 확보)
-        final finalStart = actualStart;
-        final finalEnd = actualEnd <= finalStart ? finalStart + 0.01 : actualEnd;
+        // 기초 지속시간 계산 (최소 10ms 보장)
+        double desiredDuration = math.max(actualEnd - actualStart, minimumWordDuration);
+
+        // 시작 시점 정규화 (센티초 단위) - 첫 단어는 세그먼트 시작에 맞춤
+        double normalizedStart;
+        if (refinedWords.isEmpty) {
+          normalizedStart = math.max(segmentStartRounded, _floorToCentisecond(actualStart));
+        } else {
+          normalizedStart = refinedWords.last.endSec;
+
+          // 이전 단어와의 겹침/간격 조정
+          final double previousEnd = refinedWords.last.endSec;
+
+          if (actualStart > previousEnd + gapTolerance) {
+            // 이전 단어의 끝을 현재 단어 시작으로 확장하여 공백 제거
+            final lastWord = refinedWords.removeLast();
+            final adjustedPrevious = WordSegment(
+              index: lastWord.index,
+              word: lastWord.word,
+              startSec: lastWord.startSec,
+              endSec: _ceilToCentisecond(actualStart),
+              score: lastWord.score,
+            );
+            refinedWords.add(adjustedPrevious);
+            normalizedStart = adjustedPrevious.endSec;
+          } else if (actualStart < previousEnd - gapTolerance) {
+            normalizedStart = previousEnd;
+          }
+        }
+
+        // 종료 시점 정규화 (센티초 단위)
+        double normalizedEnd = math.max(
+          normalizedStart + minimumWordDuration,
+          math.max(_ceilToCentisecond(actualEnd), _ceilToCentisecond(normalizedStart + desiredDuration)),
+        );
+
+        // 마지막 단어는 세그먼트 끝에 정렬
+        if (i == segment.words.length - 1 && normalizedEnd < segmentEndRounded) {
+          normalizedEnd = segmentEndRounded;
+        }
 
         refinedWords.add(WordSegment(
           index: word.index,
           word: word.word,
-          startSec: finalStart,
-          endSec: finalEnd,
+          startSec: normalizedStart,
+          endSec: normalizedEnd,
           score: word.score,
         ));
 
         // 모든 단어 조정 로그 출력
         if (kDebugMode) {
-          final startDiff = (finalStart - approximateStart).abs();
-          final endDiff = (finalEnd - approximateEnd).abs();
+          final startDiff = (normalizedStart - approximateStart).abs();
+          final endDiff = (normalizedEnd - approximateEnd).abs();
           final adjustmentMark = (startDiff > 0.01 || endDiff > 0.01) ? '🔧' : '✓';
-          final prevInfo = previousWordEnd != null ? ' (prev=${previousWordEnd.toStringAsFixed(2)})' : '';
-          print('  $adjustmentMark 단어 #${i + 1} "${word.word}": ${approximateStart.toStringAsFixed(2)}-${approximateEnd.toStringAsFixed(2)}s → ${finalStart.toStringAsFixed(2)}-${finalEnd.toStringAsFixed(2)}s$prevInfo');
+          final prevInfo = refinedWords.length > 1
+              ? ' (prev=${refinedWords[refinedWords.length - 2].endSec.toStringAsFixed(2)})'
+              : '';
+          print(
+            '  $adjustmentMark 단어 #${i + 1} "${word.word}": '
+            '${approximateStart.toStringAsFixed(2)}-${approximateEnd.toStringAsFixed(2)}s '
+            '→ ${normalizedStart.toStringAsFixed(2)}-${normalizedEnd.toStringAsFixed(2)}s$prevInfo',
+          );
         }
       }
 
