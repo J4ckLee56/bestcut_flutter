@@ -2189,9 +2189,9 @@ ${jsonEncode(formatted)}
         final actualStart = _findActualWordStart(approximateStart, energyProfile, previousWordEnd);
         final actualEnd = _findActualWordEnd(approximateEnd, energyProfile, nextWordStart);
 
-        // 시작이 끝보다 늦으면 안됨
+        // 시작이 끝보다 늦거나 같으면 안됨 (최소 10ms 확보)
         final finalStart = actualStart;
-        final finalEnd = actualEnd < finalStart ? finalStart + 0.01 : actualEnd;
+        final finalEnd = actualEnd <= finalStart ? finalStart + 0.01 : actualEnd;
 
         refinedWords.add(WordSegment(
           index: word.index,
