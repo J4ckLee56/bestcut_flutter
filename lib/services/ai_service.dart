@@ -3234,20 +3234,6 @@ ${jsonEncode(formatted)}
     return trimmed.length >= 5; // 5글자 이상은 완결로 간주
   }
 
-  /// 접속사로 시작하는지 체크
-  bool _startsWithConjunction(String text) {
-    final trimmed = text.trim();
-    
-    final conjunctions = [
-      '그런데', '하지만', '그리고', '그래서', '또', '또한',
-      '즉', '따라서', '그러나', '그렇지만', '근데', '그럼',
-      '왜냐하면', '예를들면', '예를 들면', '다시 말해', '다시말해',
-      '물론', '하여튼', '아무튼', '게다가', '더욱이',
-    ];
-    
-    return conjunctions.any((conj) => trimmed.startsWith(conj));
-  }
-
   /// 여러 세그먼트를 하나로 병합
   WhisperSegment _mergeSegments(List<WhisperSegment> segments) {
     if (segments.isEmpty) throw ArgumentError('빈 세그먼트 리스트');
@@ -3378,7 +3364,7 @@ ${jsonEncode(formatted)}
     return [firstSegment, secondSegment];
   }
 
-  /// 세그먼트 재조합 (짧은 세그먼트 병합 + 무음으로 끝나도록 조정)
+  /// 세그먼트 재조합 (분할 → 병합)
   List<WhisperSegment> _recombineSegments(List<WhisperSegment> segments) {
     if (segments.isEmpty) return segments;
     
@@ -3386,153 +3372,133 @@ ${jsonEncode(formatted)}
       print('=== 세그먼트 재조합 시작 (${segments.length}개) ===');
     }
     
-    // Step 1: 짧은 세그먼트 병합
-    final List<WhisperSegment> merged = [];
+    // ========================================
+    // Step 1: 무음 기반 분할 (모든 세그먼트가 무음으로 끝나도록)
+    // ========================================
+    final List<WhisperSegment> splitSegments = [];
+    for (final segment in segments) {
+      splitSegments.addAll(_splitSegmentBySilence(segment));
+    }
+    
+    if (kDebugMode) {
+      final splitSilenceCount = splitSegments.where((s) => _getTrailingSilenceDuration(s) > 0.05).length;
+      print('✂️ 분할 완료: ${segments.length}개 → ${splitSegments.length}개 (무음으로 끝남: $splitSilenceCount/${splitSegments.length})');
+    }
+    
+    // ========================================
+    // Step 2: 의미 기반 병합 (짧은 세그먼트 통합)
+    // ========================================
+    final List<WhisperSegment> result = [];
     int i = 0;
     
-    while (i < segments.length) {
-      final current = segments[i];
+    while (i < splitSegments.length) {
+      final current = splitSegments[i];
       final wordCount = current.words.length;
       final text = current.text.trim();
+      final duration = current.endSec - current.startSec;
+      final hasTrailingSilence = _getTrailingSilenceDuration(current) > 0.05;
       
-      // 단어가 1개인 경우
-      if (wordCount == 1 && !_hasCompleteSentence(text)) {
-        if (i + 1 < segments.length) {
-          final mergedSeg = _mergeSegments([current, segments[i + 1]]);
-          merged.add(mergedSeg);
-          if (kDebugMode) {
-            final preview = mergedSeg.text.length > 50 
-              ? '${mergedSeg.text.substring(0, 50)}...' 
-              : mergedSeg.text;
-            print('📦 병합(단어1개): #${current.id} + #${segments[i + 1].id} → "$preview"');
-          }
-          i += 2;
-          continue;
-        }
-      }
+      bool shouldMergeWithPrev = false;
+      String mergeReason = '';
       
-      // 단어가 2개인 경우
-      if (wordCount == 2) {
-        // 접속사로 시작하면 이전과 병합
-        if (_startsWithConjunction(text) && merged.isNotEmpty) {
-          final prev = merged.removeLast();
-          final mergedSeg = _mergeSegments([prev, current]);
-          merged.add(mergedSeg);
-          if (kDebugMode) {
-            final preview = mergedSeg.text.length > 50 
-              ? '${mergedSeg.text.substring(0, 50)}...' 
-              : mergedSeg.text;
-            print('📦 병합(접속사): #${prev.id} + #${current.id} → "$preview"');
-          }
-          i++;
-          continue;
-        }
+      // 이전 세그먼트가 있는지 확인
+      if (result.isNotEmpty) {
+        final prevDuration = result.last.endSec - result.last.startSec;
+        final mergedDuration = prevDuration + duration;
         
-        // 불완전 + 긴 무음 없음 → 다음과 병합
-        if (!_hasCompleteSentence(text)) {
-          final trailingSilence = _getTrailingSilenceDuration(current);
-          
-          if (trailingSilence < 0.5 && i + 1 < segments.length) {
-            final mergedSeg = _mergeSegments([current, segments[i + 1]]);
-            merged.add(mergedSeg);
-            if (kDebugMode) {
-              final preview = mergedSeg.text.length > 50 
-                ? '${mergedSeg.text.substring(0, 50)}...' 
-                : mergedSeg.text;
-              print('📦 병합(단어2개): #${current.id} + #${segments[i + 1].id} → "$preview"');
-            }
-            i += 2;
-            continue;
-          }
-        }
-      }
-      
-      merged.add(current);
-      i++;
-    }
-    
-    if (kDebugMode) {
-      print('📦 병합 단계 완료: ${segments.length}개 → ${merged.length}개');
-    }
-    
-    // Step 2: 무음으로 끝나도록 조정 (분할 또는 추가 병합)
-    final List<WhisperSegment> adjusted = [];
-    i = 0;
-    
-    while (i < merged.length) {
-      final current = merged[i];
-      final trailingSilence = _getTrailingSilenceDuration(current);
-      
-      // 무음으로 끝나면 그대로 유지
-      if (trailingSilence >= 0.3) {
-        adjusted.add(current);
-        i++;
-        continue;
-      }
-      
-      // 무음으로 끝나지 않는 경우
-      // 옵션 1: 다음 세그먼트와 병합 (단, 너무 길어지지 않도록)
-      if (i + 1 < merged.length) {
-        final next = merged[i + 1];
-        final nextTrailingSilence = _getTrailingSilenceDuration(next);
+        // 병합 후 5초 초과 여부 확인
+        final wouldExceedMaxDuration = mergedDuration > 5.0;
         
-        // 다음 세그먼트가 무음으로 끝나고, 병합해도 너무 길지 않으면 병합
-        if (nextTrailingSilence >= 0.3 && 
-            (current.endSec - current.startSec) + (next.endSec - next.startSec) < 15.0) {
-          final mergedSeg = _mergeSegments([current, next]);
-          adjusted.add(mergedSeg);
-          if (kDebugMode) {
-            print('📦 병합(무음): #${current.id} + #${next.id}');
+        // 우선순위 1: 무음으로 끝나지 않는 세그먼트 (무조건 병합 시도)
+        if (!hasTrailingSilence) {
+          if (!wouldExceedMaxDuration) {
+            shouldMergeWithPrev = true;
+            mergeReason = '무음없음';
           }
-          i += 2;
-          continue;
+        }
+        // 우선순위 2: 단어 1개 세그먼트
+        else if (wordCount == 1 && !_hasCompleteSentence(text)) {
+          final prevHasSilence = _getTrailingSilenceDuration(result.last) > 0.05;
+          if (prevHasSilence && !wouldExceedMaxDuration) {
+            shouldMergeWithPrev = true;
+            mergeReason = '단어1개';
+          }
+        }
+        // 우선순위 3: 짧은 시간 세그먼트
+        else if (duration < 1.0 && !_hasCompleteSentence(text)) {
+          final prevHasSilence = _getTrailingSilenceDuration(result.last) > 0.05;
+          if (prevHasSilence && !wouldExceedMaxDuration) {
+            shouldMergeWithPrev = true;
+            mergeReason = '짧은시간';
+          }
         }
       }
       
-      // 옵션 2: 현재 세그먼트 내에서 긴 무음을 찾아 분할
-      final splitPoint = _findSilenceSplitPoint(current);
-      if (splitPoint != null) {
-        final splitSegments = _splitSegmentAtWord(current, splitPoint);
-        adjusted.addAll(splitSegments);
+      if (shouldMergeWithPrev) {
+        final prevSegment = result.removeLast();
+        final merged = _mergeSegments([prevSegment, current]);
+        result.add(merged);
+        
         if (kDebugMode) {
-          print('✂️ 분할(무음): #${current.id} → 2개 세그먼트');
+          final preview = merged.text.length > 50 
+            ? '${merged.text.substring(0, 50)}...' 
+            : merged.text;
+          print('📦 병합($mergeReason): #${prevSegment.id}+#${current.id} → "$preview" (${(merged.endSec - merged.startSec).toStringAsFixed(1)}s)');
         }
-        i++;
-        continue;
+      } else {
+        result.add(current);
       }
       
-      // 조정 불가능 - 그대로 유지
-      adjusted.add(current);
       i++;
     }
     
     if (kDebugMode) {
-      print('✂️ 무음 조정 완료: ${merged.length}개 → ${adjusted.length}개');
+      print('📦 병합 완료: ${splitSegments.length}개 → ${result.length}개');
     }
     
-    // Step 3: ID 재할당
-    final reindexed = <WhisperSegment>[];
-    for (int i = 0; i < adjusted.length; i++) {
-      reindexed.add(adjusted[i].copyWith(id: i + 1));
+    // ========================================
+    // Step 3: ID 재할당 및 최종 통계
+    // ========================================
+    for (int i = 0; i < result.length; i++) {
+      result[i] = result[i].copyWith(id: i + 1);
     }
+    
+    final endingSilenceCount = result.where((s) => _getTrailingSilenceDuration(s) > 0.05).length;
+    final endingSilencePercent = (endingSilenceCount / result.length * 100).toStringAsFixed(1);
     
     if (kDebugMode) {
-      final totalChange = segments.length - reindexed.length;
-      final sign = totalChange >= 0 ? '' : '+';
-      print('=== 세그먼트 재조합 완료: ${segments.length}개 → ${reindexed.length}개 (${sign}${-totalChange}) ===');
-      
-      // 무음으로 끝나는 세그먼트 비율 계산
-      int endsWithSilence = 0;
-      for (final seg in reindexed) {
-        if (_getTrailingSilenceDuration(seg) >= 0.3) {
-          endsWithSilence++;
-        }
-      }
-      final percentage = (endsWithSilence / reindexed.length * 100).toStringAsFixed(1);
-      print('🔇 무음으로 끝나는 세그먼트: $endsWithSilence/${reindexed.length} ($percentage%)');
+      print('=== 세그먼트 재조합 완료: ${segments.length}개 → ${result.length}개 (${result.length - segments.length >= 0 ? '+' : ''}${result.length - segments.length}) ===');
+      print('🔇 무음으로 끝나는 세그먼트: $endingSilenceCount/${result.length} ($endingSilencePercent%)');
     }
     
-    return reindexed;
+    return result;
+  }
+  
+  /// 세그먼트를 무음 기준으로 재귀적으로 분할
+  List<WhisperSegment> _splitSegmentBySilence(WhisperSegment segment) {
+    final hasTrailingSilence = _getTrailingSilenceDuration(segment) > 0.05;
+    
+    // 이미 무음으로 끝나면 그대로 반환
+    if (hasTrailingSilence) {
+      return [segment];
+    }
+    
+    // 내부에서 긴 무음(0.3초 이상) 찾기
+    final splitPoint = _findSilenceSplitPoint(segment, minSilenceDuration: 0.3);
+    
+    if (splitPoint == null) {
+      // 분할점 없음 → 그대로 반환 (무음 없이 유지)
+      return [segment];
+    }
+    
+    // 분할 실행
+    final splitSegments = _splitSegmentAtWord(segment, splitPoint);
+    
+    // 두 번째 세그먼트를 재귀적으로 처리
+    final result = <WhisperSegment>[splitSegments[0]];
+    result.addAll(_splitSegmentBySilence(splitSegments[1]));
+    
+    return result;
   }
 
 }
