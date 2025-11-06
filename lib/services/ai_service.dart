@@ -712,13 +712,10 @@ class AIService {
 
       print('whisper.cpp 성공: ${enrichedSegments.length}개 세그먼트 (단어 포함=${enrichedSegments.isNotEmpty && enrichedSegments.first.words.isNotEmpty})');
       
-      // 에너지 프로파일 기반 단어·무음 정규화 단계 (임시 비활성화)
-      // print('=== 에너지 기반 단어·무음 타임라인 정규화 시작 ===');
-      // final normalizedSegments = _refineWordBoundariesWithEnergy(enrichedSegments, energyProfile);
-      // print('에너지 기반 단어·무음 타임라인 정규화 완료');
-      
-      print('⚠️ 에너지 기반 조정 비활성화 - WhisperX 원본 타이밍 사용');
-      final normalizedSegments = enrichedSegments; // 에너지 조정 스킵
+      // 에너지 프로파일 기반 단어·무음 정규화 단계
+      print('=== 에너지 기반 단어·무음 타임라인 정규화 시작 ===');
+      final normalizedSegments = _refineWordBoundariesWithEnergy(enrichedSegments, energyProfile);
+      print('에너지 기반 단어·무음 타임라인 정규화 완료');
 
       print('=== FFmpeg 무음 구간 병합 시작 ===');
       final ffmpegMergedSegments = _mergeDetectedSilences(normalizedSegments, silences);
