@@ -236,8 +236,9 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
       }
     }
     
-    // wordIndexToSplit이 null이면 무음이 마지막 (무음만 있는 세그먼트 생성 불가)
-    // wordIndexToSplit이 0이면 무음이 맨 앞 (단어칩과 동일하게 허용)
+    // wordIndexToSplit이 null: 무음이 마지막 → 분할 불가
+    // wordIndexToSplit이 0: 무음이 맨 앞 → 분할 불가 (단어칩과 동일)
+    // wordIndexToSplit이 1 이상: 정상 분할 가능
     if (wordIndexToSplit == null) {
       if (kDebugMode) {
         print('❌ 무음 뒤에 단어가 없습니다. 무음이 세그먼트 마지막에 있어 분할 불가능합니다.');
@@ -245,8 +246,14 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
       return false;
     }
     
-    // wordIndexToSplit이 0이면 무음만 있는 세그먼트 생성
-    // wordIndexToSplit이 1 이상이면 정상 분할
+    if (wordIndexToSplit == 0) {
+      if (kDebugMode) {
+        print('❌ 맨 앞 무음은 분할할 수 없습니다. (맨 앞 단어와 동일한 제약)');
+      }
+      return false;
+    }
+    
+    // wordIndexToSplit >= 1: 정상 분할
     return widget.appState.splitSegmentAtWord(segmentIndex, wordIndexToSplit);
   }
   
@@ -829,6 +836,34 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     final words = segment.words;
     final silences = segment.silences;
     
+    final currentPosition = widget.appState.videoController?.value.position;
+    final currentSec = (currentPosition?.inMilliseconds ?? 0) / 1000.0;
+    
+    // 단어가 없고 무음만 있는 경우: 무음칩만 표시
+    if (words.isEmpty && silences.isNotEmpty) {
+      return Wrap(
+        spacing: CursorTheme.spacingXS,
+        runSpacing: CursorTheme.spacingXS,
+        children: silences.asMap().entries.map((entry) {
+          final silenceIndex = entry.key;
+          final silence = entry.value;
+          final isPlayingSilence = currentSec >= silence.startSec && currentSec < silence.endSec;
+          final isSelectedSilence = _selectedSilenceSegmentIndex == segmentIndex &&
+              _selectedSilenceIndex == silenceIndex;
+          
+          return _buildSilenceChip(
+            context,
+            segmentIndex: segmentIndex,
+            silenceIndex: silenceIndex,
+            silence: silence,
+            isPlaying: isPlayingSilence,
+            isSelected: isSelectedSilence,
+          );
+        }).toList(),
+      );
+    }
+    
+    // 단어도 없고 무음도 없는 경우: 텍스트만 표시
     if (words.isEmpty) {
       return Text(
         segment.text,
@@ -839,9 +874,6 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
         softWrap: true,
       );
     }
-
-    final currentPosition = widget.appState.videoController?.value.position;
-    final currentSec = (currentPosition?.inMilliseconds ?? 0) / 1000.0;
 
     // 단어와 무음을 시간 순서대로 정렬하여 표시
     final List<Widget> widgets = [];
