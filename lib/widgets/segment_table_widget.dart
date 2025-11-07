@@ -225,33 +225,6 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     }
   }
   
-  // 무음만 있는 세그먼트를 만들기 위한 수동 분할
-  // splitTime 이전은 무음만, 이후는 모든 단어
-  // 더 이상 필요 없음: words에 무음이 포함되어 있으므로 직접 AppState.splitSegmentAtWord 사용 불가
-  // 대신 splitTime 이후의 첫 번째 단어를 찾아서 그 단어 인덱스로 분할
-  bool _splitSegmentAtSilenceManual(int segmentIndex, double splitTime) {
-    final segment = widget.appState.segments[segmentIndex];
-    
-    // splitTime 이후의 첫 번째 단어 찾기
-    int wordIndexToSplit = 0;
-    for (int i = 0; i < segment.words.length; i++) {
-      if (segment.words[i].startSec >= splitTime) {
-        wordIndexToSplit = i;
-        break;
-      }
-    }
-    
-    if (wordIndexToSplit == 0) {
-      if (kDebugMode) {
-        print('❌ splitTime 이후에 단어를 찾을 수 없습니다.');
-      }
-      return false;
-    }
-    
-    // AppState의 splitSegmentAtWord 사용
-    return widget.appState.splitSegmentAtWord(segmentIndex, wordIndexToSplit);
-  }
-  
   // 무음 기준으로 세그먼트 분할 (무음 뒤에서 분할)
   bool _splitSegmentAtSilence(int segmentIndex, int silenceIndex) {
     final segment = widget.appState.segments[segmentIndex];
@@ -293,52 +266,24 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
       }
     }
     
-    // 무음 뒤의 첫 번째 단어 찾기
-    // 무음 끝 시점(endSec) 이후의 첫 번째 단어부터 새 세그먼트
-    int? wordIndexToSplit;
-    for (int i = 0; i < segment.words.length; i++) {
-      if (segment.words[i].startSec >= silence.endSec) {
-        wordIndexToSplit = i;
-        break;
-      }
-    }
-    
-    if (kDebugMode) {
-      print('  - 무음 뒤 첫 단어 인덱스: $wordIndexToSplit');
-      if (wordIndexToSplit != null && wordIndexToSplit < segment.words.length) {
-        print('  - 무음 뒤 첫 단어: "${segment.words[wordIndexToSplit].word}"');
-      }
-    }
-    
-    // wordIndexToSplit이 null: 무음이 마지막 → 분할 불가 (뒤에 토큰 없음)
-    if (wordIndexToSplit == null) {
+    // 무음 뒤의 첫 번째 토큰부터 새 세그먼트 시작
+    final splitIndex = silenceIndex + 1;
+    if (splitIndex >= segment.words.length) {
       if (kDebugMode) {
-        print('❌ 무음 뒤에 단어가 없습니다. 무음이 세그먼트 마지막에 있어 분할 불가능합니다.');
+        print('❌ 무음 뒤에 이어지는 토큰이 없어 분할할 수 없습니다.');
       }
       return false;
     }
     
-    // wordIndexToSplit == 0: 무음 앞에 단어가 없음
-    //   → 분할하면 세그먼트1은 무음만, 세그먼트2는 모든 단어
-    //   → 세그먼트1에 최소 1개 토큰(무음) 있으므로 허용
-    // wordIndexToSplit >= 1: 정상 분할 (무음 앞에 단어 있음)
-    
-    // splitSegmentAtWord는 wordIndex <= 0을 막지만,
-    // 무음만 있는 세그먼트를 만들기 위해서는 wordIndex == 0을 허용해야 함
-    // → 특별 처리: wordIndexToSplit == 0일 때는 수동으로 분할
-    if (wordIndexToSplit == 0) {
-      if (kDebugMode) {
-        print('  → 수동 분할 호출 (무음만 있는 세그먼트 생성)');
-      }
-      // 무음만 있는 첫 번째 세그먼트를 만들기 위한 특별 분할
-      return _splitSegmentAtSilenceManual(segmentIndex, silence.endSec);
-    }
-    
     if (kDebugMode) {
-      print('  → splitSegmentAtWord 호출 (wordIndex=$wordIndexToSplit)');
+      final nextToken = segment.words[splitIndex];
+      final tokenLabel = nextToken.isSilence ? '무음' : '"${nextToken.word}"';
+      print('  - 분할 인덱스: $splitIndex');
+      print('  - 분할 이후 첫 토큰: $tokenLabel');
+      print('  → splitSegmentAtWord 호출 (wordIndex=$splitIndex)');
     }
-    // wordIndexToSplit >= 1: 정상적으로 splitSegmentAtWord 사용
-    return widget.appState.splitSegmentAtWord(segmentIndex, wordIndexToSplit);
+    
+    return widget.appState.splitSegmentAtWord(segmentIndex, splitIndex);
   }
   
   // 세그먼트 병합 처리
