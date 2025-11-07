@@ -315,29 +315,20 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
       }
     }
     
-    // 무음 뒤의 첫 번째 토큰부터 새 세그먼트 시작
-    final splitIndex = silenceIndex + 1;
-    if (splitIndex >= segment.words.length) {
+    // 무음 앞에서 분할될 수 있도록 현재 무음 인덱스를 그대로 사용
+    final splitIndex = silenceIndex;
+
+    if (splitIndex <= 0) {
       if (kDebugMode) {
-        print('❌ 무음 뒤에 이어지는 토큰이 없어 분할할 수 없습니다.');
-        print('  → 무음 보장 세그먼트 생성 로직 수행');
+        print('❌ 무음이 세그먼트의 첫 토큰이어서 분할할 수 없습니다.');
       }
-
-      final firstWords = segment.words.sublist(0, silenceIndex + 1);
-      if (firstWords.length == segment.words.length) {
-        if (kDebugMode) {
-          print('⚠️ 분할 결과 두 번째 세그먼트가 비게 되므로 취소합니다.');
-        }
-        return false;
-      }
-
-      return widget.appState.splitSegmentAtWord(segmentIndex, firstWords.length);
+      return false;
     }
     
     if (kDebugMode) {
       final nextToken = segment.words[splitIndex];
       final tokenLabel = nextToken.isSilence ? '무음' : '"${nextToken.word}"';
-      print('  - 분할 인덱스: $splitIndex');
+      print('  - 무음 앞에서 분할 인덱스: $splitIndex');
       print('  - 분할 이후 첫 토큰: $tokenLabel');
       print('  → splitSegmentAtWord 호출 (wordIndex=$splitIndex)');
     }
