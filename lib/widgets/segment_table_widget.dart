@@ -20,7 +20,7 @@ class SegmentTableWidget extends StatefulWidget {
   final void Function(int) onSegmentSecondaryTap;
   final void Function(int) onSegmentDoubleTap;
   final void Function(int, WordSegment)? onWordTap;
-  final void Function(int, SilenceSegment)? onSilenceTap;
+  final void Function(int, WordSegment)? onSilenceTap;
   final void Function(int, String) onFinishEditing;
   final double previewWidth;
 
@@ -125,7 +125,7 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     });
   }
 
-  void _handleSilenceTap(int segmentIndex, int silenceIndex, SilenceSegment silence) {
+  void _handleSilenceTap(int segmentIndex, int silenceIndex, WordSegment silence) {
     if (kDebugMode) {
       print('🖱️ 무음 선택됨 (index=$segmentIndex, silenceIndex=$silenceIndex, range=${silence.startSec.toStringAsFixed(2)}-${silence.endSec.toStringAsFixed(2)}s)');
     }
@@ -916,7 +916,12 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     }
   }
 
-  Widget _buildSegmentWordWrap(BuildContext context, int segmentIndex, WhisperSegment segment, {required bool isActive}) {
+  Widget _buildSegmentWordWrap(
+    BuildContext context,
+    int segmentIndex,
+    WhisperSegment segment, {
+    required bool isActive,
+  }) {
     final words = segment.words;
     
     final currentPosition = widget.appState.videoController?.value.position;
@@ -974,67 +979,6 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     
     return Wrap(
       spacing: CursorTheme.spacingXS,
-      runSpacing: CursorTheme.spacingXS,
-      children: widgets,
-    );
-  }
-
-  // _buildSilenceChip 시그니처를 WordSegment로 변경
-  Widget _buildSilenceChip_OLD(
-    BuildContext context, {
-    required int segmentIndex,
-    required int silenceIndex,
-    required dynamic silence, // SilenceSegment 또는 WordSegment
-        
-        // 무음이 이 단어와 다음 단어 사이에 있으면 추가
-        final nextWordStart = (i < words.length - 1) ? words[i + 1].startSec : segment.endSec;
-        
-        if (silence.startSec >= word.endSec && silence.startSec < nextWordStart) {
-          final currentSilenceIndex = silenceIndex;
-          final isPlayingSilence = currentSec >= silence.startSec && currentSec < silence.endSec;
-          final isSelectedSilence = _selectedSilenceSegmentIndex == segmentIndex &&
-              _selectedSilenceIndex == currentSilenceIndex;
-
-          widgets.add(_buildSilenceChip(
-            context,
-            segmentIndex: segmentIndex,
-            silenceIndex: currentSilenceIndex,
-            silence: silence,
-            isPlaying: isPlayingSilence,
-            isSelected: isSelectedSilence,
-          ));
-          silenceIndex++;
-        } else if (silence.startSec >= nextWordStart) {
-          // 다음 단어 영역이므로 나중에 처리
-          break;
-        } else {
-          // 현재 단어와 겹치는 무음 (이미 단어가 조정됨)
-          silenceIndex++;
-        }
-      }
-    }
-    
-    // 마지막 단어 이후의 남은 무음 추가
-    while (silenceIndex < sortedSilences.length) {
-      final currentSilenceIndex = silenceIndex;
-      final silence = sortedSilences[currentSilenceIndex];
-      final isPlayingSilence = currentSec >= silence.startSec && currentSec < silence.endSec;
-      final isSelectedSilence = _selectedSilenceSegmentIndex == segmentIndex &&
-          _selectedSilenceIndex == currentSilenceIndex;
-
-      widgets.add(_buildSilenceChip(
-        context,
-        segmentIndex: segmentIndex,
-        silenceIndex: currentSilenceIndex,
-        silence: silence,
-        isPlaying: isPlayingSilence,
-        isSelected: isSelectedSilence,
-      ));
-      silenceIndex++;
-    }
-
-    return Wrap(
-      spacing: 2,
       runSpacing: CursorTheme.spacingXS,
       children: widgets,
     );
@@ -1103,7 +1047,7 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     BuildContext context, {
     required int segmentIndex,
     required int silenceIndex,
-    required SilenceSegment silence,
+    required WordSegment silence,
     required bool isPlaying,
     required bool isSelected,
   }) {

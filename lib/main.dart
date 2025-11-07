@@ -689,7 +689,7 @@ class _BestCutHomePageState extends State<BestCutHomePage> {
                       _videoService.seekTo(targetPosition);
                     }
                   },
-                  onSilenceTap: (segmentIndex, SilenceSegment silence) {
+                  onSilenceTap: (segmentIndex, WordSegment silence) {
                     if (segmentIndex >= 0 && segmentIndex < _appState.segments.length) {
                       final targetPosition =
                           Duration(milliseconds: (silence.startSec * 1000).round());

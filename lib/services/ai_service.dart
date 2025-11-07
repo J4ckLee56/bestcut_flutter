@@ -139,25 +139,16 @@ class AIService {
     return newSegment;
   }
 
-  WhisperSegment _appendSilenceToSegment(WhisperSegment segment, SilenceSegment silence) {
-    final List<SilenceSegment> updatedSilences = List<SilenceSegment>.from(segment.silences);
-    _addOrMergeSilence(updatedSilences, silence.startSec, silence.endSec);
-    if (updatedSilences.isEmpty) {
-      return segment;
-    }
-
-    updatedSilences.sort((a, b) => a.startSec.compareTo(b.startSec));
-
-    double newStart = segment.startSec;
-    double newEnd = segment.endSec;
-    newStart = math.min(newStart, updatedSilences.first.startSec);
-    newEnd = math.max(newEnd, updatedSilences.last.endSec);
-
-    return segment.copyWith(
-      silences: updatedSilences,
-      startSec: newStart,
-      endSec: newEnd,
-    );
+  List<SilenceSegment> _extractSilenceSegments(List<WordSegment> words) {
+    return [
+      for (final word in words)
+        if (word.isSilence)
+          SilenceSegment(
+            startSec: word.startSec,
+            endSec: word.endSec,
+            duration: word.endSec - word.startSec,
+          ),
+    ];
   }
 
   // CreditService getter
@@ -1559,7 +1550,7 @@ ${chunkOverviews.map((overview) => '''
     ];
 
     final List<List<SilenceSegment>> silencesPerSegment = [
-      for (final segment in segments) List<SilenceSegment>.from(segment.silences)
+      for (int i = 0; i < segments.length; i++) <SilenceSegment>[],
     ];
 
     final List<_WordPointer> pointers = [];
@@ -2757,147 +2748,6 @@ ${jsonEncode(formatted)}
     return result;
   }
 
-  // 무음 구간 기반 세그먼트 경계 조정 (과거 로직)
-  // ignore: unused_element
-  List<WhisperSegment> _integrateSilenceIntoSegments(
-    List<WhisperSegment> segments,
-    List<SilenceSegment> allSilences,
-  ) {
-    if (kDebugMode) {
-      print('=== 무음 기반 세그먼트 경계 조정 시작 ===');
-      print('전체 무음: ${allSilences.length}개');
-      print('전체 세그먼트: ${segments.length}개');
-    }
-
-    if (allSilences.isEmpty) {
-      if (kDebugMode) print('무음이 없어 조정 건너뜁니다.');
-      return segments;
-    }
-
-    final List<WhisperSegment> result = [];
-
-    for (int i = 0; i < segments.length; i++) {
-      final segment = segments[i];
-      final words = List<WordSegment>.from(segment.words);
-      final segmentSilences = <SilenceSegment>[];
-
-      if (words.isEmpty) {
-        result.add(segment);
-        continue;
-      }
-
-      // 세그먼트 간 무음 찾기 (이 세그먼트와 다음 세그먼트 사이)
-      if (i < segments.length - 1) {
-        final nextSegment = segments[i + 1];
-        
-        // 현재 세그먼트 끝 단어와 다음 세그먼트 시작 단어 사이의 무음 찾기
-        final currentLastWord = words.last;
-        final nextFirstWord = nextSegment.words.isNotEmpty ? nextSegment.words.first : null;
-
-        if (nextFirstWord != null) {
-          // 세그먼트 간 무음 찾기
-          for (final silence in allSilences) {
-            // 무음이 현재 세그먼트 끝과 다음 세그먼트 시작 사이에 있는지 확인
-            // 조건 완화: 무음이 두 단어 범위와 겹치기만 하면 OK
-            final silenceAfterCurrent = silence.endSec > currentLastWord.endSec;
-            final silenceBeforeOrOverlapsNext = silence.startSec <= nextFirstWord.endSec;
-            
-            if (silenceAfterCurrent && silenceBeforeOrOverlapsNext) {
-              // 현재 세그먼트 끝 단어 조정
-              final adjustedEnd = silence.startSec < currentLastWord.endSec 
-                  ? currentLastWord.endSec  // 무음이 단어와 겹치면 단어 유지
-                  : silence.startSec;       // 무음이 단어 이후면 무음 시작으로
-                  
-              words[words.length - 1] = WordSegment(
-                index: currentLastWord.index,
-                word: currentLastWord.word,
-                startSec: currentLastWord.startSec,
-                endSec: adjustedEnd,
-                score: currentLastWord.score,
-              );
-
-              // 무음을 현재 세그먼트에 추가
-              if (!segmentSilences.contains(silence)) {
-                segmentSilences.add(silence);
-
-                if (kDebugMode) {
-                  print('세그먼트 ${segment.id} 끝 단어 "${currentLastWord.word}" 조정: ${currentLastWord.endSec.toStringAsFixed(2)}s → ${adjustedEnd.toStringAsFixed(2)}s');
-                  print('  → 무음 ${silence.startSec.toStringAsFixed(2)}s-${silence.endSec.toStringAsFixed(2)}s를 세그먼트 ${segment.id}에 추가');
-                }
-              }
-            }
-          }
-        }
-      }
-
-      // 세그먼트 내부 무음도 찾기
-      for (int w = 0; w < words.length - 1; w++) {
-        final currentWord = words[w];
-        final nextWord = words[w + 1];
-
-        for (final silence in allSilences) {
-          // 무음이 같은 세그먼트 내 두 단어 사이에 있음
-          if (silence.startSec >= currentWord.endSec && 
-              silence.endSec <= nextWord.startSec &&
-              !segmentSilences.contains(silence)) {
-            segmentSilences.add(silence);
-          }
-        }
-      }
-
-      // 조정된 세그먼트 생성
-      final adjustedSegment = segment.copyWith(
-        words: words,
-        startSec: words.first.startSec,
-        endSec: words.last.endSec,
-        silences: segmentSilences,
-      );
-
-      result.add(adjustedSegment);
-    }
-
-    // 다음 세그먼트 시작 단어 조정 (역방향 패스)
-    for (int i = 1; i < result.length; i++) {
-      final prevSegment = result[i - 1];
-      final currentSegment = result[i];
-
-      // 이전 세그먼트의 무음이 있으면
-      if (prevSegment.silences.isNotEmpty && currentSegment.words.isNotEmpty) {
-        final lastSilence = prevSegment.silences.last;
-        final firstWord = currentSegment.words.first;
-
-        // 무음 끝이 현재 세그먼트 시작 단어보다 뒤에 있으면 조정
-        if (lastSilence.endSec > firstWord.startSec) {
-          final adjustedWords = List<WordSegment>.from(currentSegment.words);
-          adjustedWords[0] = WordSegment(
-            index: firstWord.index,
-            word: firstWord.word,
-            startSec: lastSilence.endSec, // 무음 끝으로 시작 조정
-            endSec: firstWord.endSec,
-            score: firstWord.score,
-          );
-
-          result[i] = currentSegment.copyWith(
-            words: adjustedWords,
-            startSec: adjustedWords.first.startSec,
-          );
-
-          if (kDebugMode) {
-            print('세그먼트 ${currentSegment.id} 시작 단어 "${firstWord.word}" 조정: ${firstWord.startSec.toStringAsFixed(2)}s → ${lastSilence.endSec.toStringAsFixed(2)}s');
-          }
-        }
-      }
-    }
-
-    if (kDebugMode) {
-      print('=== 무음 기반 세그먼트 경계 조정 완료 ===');
-      print('조정된 세그먼트: ${result.length}개');
-    }
-
-    return result;
-  }
-
-  
   // SRT 시간을 초 단위로 변환
   double _srtTimeToSeconds(String srtTime) {
     final parts = srtTime.split(':');
@@ -3219,7 +3069,7 @@ ${jsonEncode(formatted)}
   ) {
     final List<SilenceSegment> allSilences = [];
     for (final segment in segments) {
-      allSilences.addAll(segment.silences);
+      allSilences.addAll(_extractSilenceSegments(segment.words));
     }
     allSilences.sort((a, b) => a.startSec.compareTo(b.startSec));
 
@@ -3365,13 +3215,6 @@ ${jsonEncode(formatted)}
       mergedWords.addAll(seg.words);
     }
     
-    // 무음 병합
-    final mergedSilences = <SilenceSegment>[];
-    for (final seg in segments) {
-      mergedSilences.addAll(seg.silences);
-    }
-    mergedSilences.sort((a, b) => a.startSec.compareTo(b.startSec));
-    
     // confidence 평균 계산
     final avgConfidence = segments
       .map((s) => s.confidence)
@@ -3384,7 +3227,6 @@ ${jsonEncode(formatted)}
       text: mergedText,
       confidence: avgConfidence,
       words: mergedWords,
-      silences: mergedSilences,
     );
   }
 

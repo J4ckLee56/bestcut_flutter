@@ -24,7 +24,7 @@ class MainContentWidget extends StatefulWidget {
   final void Function(int) onSegmentSecondaryTap;
   final void Function(int) onSegmentDoubleTap;
   final void Function(int, WordSegment)? onWordTap;
-  final void Function(int, SilenceSegment)? onSilenceTap;
+  final void Function(int, WordSegment)? onSilenceTap;
   final void Function(int, String) onFinishEditing;
   final VoidCallback? onExportXML;
   final VoidCallback? onExportFCPXML;
