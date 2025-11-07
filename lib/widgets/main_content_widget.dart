@@ -5,8 +5,7 @@ import '../models/whisper_segment.dart';
 import 'video_player_widget.dart';
 import 'segment_table_widget.dart';
 import 'action_buttons_widget.dart';
-import 'export_menu_widget.dart';
-import '../utils/ui_constants.dart';
+import 'waveform_editor_panel.dart';
 import '../theme/cursor_theme.dart';
 
 class MainContentWidget extends StatefulWidget {
@@ -32,6 +31,7 @@ class MainContentWidget extends StatefulWidget {
   final VoidCallback? onExportMP4;
   final VoidCallback? onExportSummaryXML;
   final VoidCallback? onTogglePlayPause; // VideoService 콜백 추가
+  final void Function(double seconds)? onWaveformSeek;
   final VoidCallback? onExportSummaryFCPXML;
   final VoidCallback? onExportSummaryDaVinciXML;
   final VoidCallback? onExportSummaryMP4;
@@ -55,6 +55,7 @@ class MainContentWidget extends StatefulWidget {
     this.onExportMP4,
     this.onExportSummaryXML,
     this.onTogglePlayPause,
+    this.onWaveformSeek,
     this.onExportSummaryFCPXML,
     this.onExportSummaryDaVinciXML,
     this.onExportSummaryMP4,
@@ -75,8 +76,39 @@ class _MainContentWidgetState extends State<MainContentWidget> {
   static const double _maxLeftPanelWidth = 800.0;
 
   @override
+  void initState() {
+    super.initState();
+    widget.appState.addListener(_handleAppStateChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant MainContentWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.appState != widget.appState) {
+      oldWidget.appState.removeListener(_handleAppStateChanged);
+      widget.appState.addListener(_handleAppStateChanged);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.appState.removeListener(_handleAppStateChanged);
+    super.dispose();
+  }
+
+  void _handleAppStateChanged() {
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  void _toggleWaveformPanel() {
+    final newValue = !widget.appState.isWaveformEditorVisible;
+    widget.appState.isWaveformEditorVisible = newValue;
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Container(
+    final baseContent = Container(
       width: double.infinity,
       height: double.infinity,
       decoration: CursorTheme.containerDecoration(
@@ -182,7 +214,15 @@ class _MainContentWidgetState extends State<MainContentWidget> {
                         padding: const EdgeInsets.all(CursorTheme.spacingM), // 패딩 축소
                         child: Column(
                           children: [
-                            _buildSectionHeader('세그먼트 목록', Icons.list_alt),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: _buildSectionHeader('세그먼트 목록', Icons.list_alt),
+                                ),
+                                const SizedBox(width: CursorTheme.spacingS),
+                                _buildWaveformToggleButton(),
+                              ],
+                            ),
                             const SizedBox(height: CursorTheme.spacingS), // 간격 축소
                             
                             Expanded(
@@ -222,14 +262,26 @@ class _MainContentWidgetState extends State<MainContentWidget> {
         ],
       ),
     );
-  }
 
-  WhisperSegment? get _currentSegment {
-    final index = widget.appState.currentSegmentIndex;
-    if (index == null || index < 0 || index >= widget.appState.segments.length) {
-      return null;
-    }
-    return widget.appState.segments[index];
+    return Stack(
+      children: [
+        baseContent,
+        if (widget.appState.isWaveformEditorVisible)
+          Positioned(
+            left: CursorTheme.spacingL,
+            right: CursorTheme.spacingL,
+            bottom: CursorTheme.spacingL,
+            child: WaveformEditorPanel(
+              appState: widget.appState,
+              onClose: () => widget.appState.isWaveformEditorVisible = false,
+              onCancel: () => widget.appState.isWaveformEditorVisible = false,
+              onConfirm: () => widget.appState.isWaveformEditorVisible = false,
+              onTogglePlayPause: widget.onTogglePlayPause,
+              onSeek: widget.onWaveformSeek,
+            ),
+          ),
+      ],
+    );
   }
 
   // 드래그 가능한 구분선 위젯
@@ -309,6 +361,20 @@ class _MainContentWidgetState extends State<MainContentWidget> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildWaveformToggleButton() {
+    final bool isVisible = widget.appState.isWaveformEditorVisible;
+    final bool hasData = widget.appState.energyProfile.isNotEmpty && widget.appState.segments.isNotEmpty;
+
+    return TextButton.icon(
+      onPressed: hasData ? _toggleWaveformPanel : null,
+      style: TextButton.styleFrom(
+        foregroundColor: isVisible ? CursorTheme.cursorBlue : CursorTheme.textSecondary,
+      ),
+      icon: Icon(isVisible ? Icons.close_fullscreen : Icons.multitrack_audio),
+      label: Text(isVisible ? '닫기' : '파형 편집'),
     );
   }
 

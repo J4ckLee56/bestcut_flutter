@@ -22,6 +22,21 @@ class CancellationException implements Exception {
   String toString() => message;
 }
 
+class _EnergyBucket {
+  _EnergyBucket({required this.start});
+
+  final double start;
+  double _sum = 0;
+  int _count = 0;
+
+  void add(double value) {
+    _sum += value;
+    _count++;
+  }
+
+  double get average => _count == 0 ? 0.0 : _sum / _count;
+}
+
 class AIService {
   final AppState appState;
   final BuildContext context;
@@ -346,6 +361,8 @@ class AIService {
       appState.themeGroups.clear(); // 챕터 요약 박스도 초기화
       appState.currentSegmentIndex = -1; // 현재 세그먼트 인덱스 초기화
       appState.isPreviewMode = false; // 프리뷰 모드 해제
+      appState.energyProfile = [];
+      appState.isWaveformEditorVisible = false;
       
       print('기존 세그먼트 데이터 초기화 완료');
       
@@ -433,6 +450,7 @@ class AIService {
       print('=== FFmpeg 오디오 에너지 분석 시작 ===');
       final energyProfile = await _analyzeAudioEnergy(audioPath, ffmpegPath, env);
       print('에너지 프레임: ${energyProfile.length}개 (${(energyProfile.length * 0.1).toStringAsFixed(1)}초)');
+      appState.energyProfile = energyProfile;
       
       // FFmpeg silencedetect로 무음 구간 감지
       print('=== FFmpeg 무음 구간 감지 시작 ===');
@@ -760,7 +778,14 @@ class AIService {
       
       // 에너지 프로파일 기반 단어·무음 정규화 단계
       print('=== 에너지 기반 단어·무음 타임라인 정규화 시작 ===');
-      final normalizedSegments = _refineWordBoundariesWithEnergy(enrichedSegments, energyProfile);
+      final energyProfileForAlignment = _downsampleEnergyProfile(
+        energyProfile,
+        targetInterval: 0.1,
+      );
+      final normalizedSegments = _refineWordBoundariesWithEnergy(
+        enrichedSegments,
+        energyProfileForAlignment.isNotEmpty ? energyProfileForAlignment : energyProfile,
+      );
       print('에너지 기반 단어·무음 타임라인 정규화 완료');
 
       print('=== FFmpeg 무음 구간 병합 시작 ===');
@@ -2413,7 +2438,7 @@ ${jsonEncode(formatted)}
         scriptPath,
         '--audio', audioPath,
         '--output-json', energyJsonPath,
-        '--frame-length', '0.1',  // 100ms 프레임
+        '--frame-length', '0.01',  // 10ms 프레임 (파형 해상도 향상)
         '--silence-threshold', '-40.0',
       ],
       environment: env,
@@ -2458,6 +2483,37 @@ ${jsonEncode(formatted)}
       print('⚠️ 에너지 프로파일 JSON 파싱 실패: $e');
       return [];
     }
+  }
+
+  List<AudioEnergyFrame> _downsampleEnergyProfile(
+    List<AudioEnergyFrame> frames, {
+    double targetInterval = 0.1,
+  }) {
+    if (frames.isEmpty || targetInterval <= 0) return frames;
+
+    final Map<int, _EnergyBucket> buckets = {};
+
+    for (final frame in frames) {
+      final bucketIndex = (frame.timeSec / targetInterval).floor();
+      final bucket = buckets.putIfAbsent(
+        bucketIndex,
+        () => _EnergyBucket(start: bucketIndex * targetInterval),
+      );
+      bucket.add(frame.rmsLevel);
+    }
+
+    final sortedKeys = buckets.keys.toList()..sort();
+    final List<AudioEnergyFrame> result = [];
+
+    for (final key in sortedKeys) {
+      final bucket = buckets[key]!;
+      result.add(AudioEnergyFrame(
+        timeSec: _roundToCentisecond(bucket.start),
+        rmsLevel: bucket.average,
+      ));
+    }
+
+    return result;
   }
 
   // FFmpeg silencedetect로 무음 구간 감지

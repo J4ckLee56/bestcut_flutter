@@ -15,11 +15,13 @@ class AppState extends ChangeNotifier {
   bool _isRecognizing = false;
   bool _isSummarizing = false;
   List<WhisperSegment> _segments = [];
+  List<AudioEnergyFrame> _energyProfile = [];
   String? _summary;
   int _recognizeSession = 0; // 동영상 변경 시 세션 증가
   List<int> _highlightedSegments = [];
   List<ThemeGroup> _themeGroups = [];
   String? _currentProjectPath; // 현재 프로젝트 파일 경로
+  bool _isWaveformEditorVisible = false;
   
   // 비디오 컨트롤 관련 상태
   bool _isPlaying = false;
@@ -70,11 +72,13 @@ class AppState extends ChangeNotifier {
   bool get isRecognizing => _isRecognizing;
   bool get isSummarizing => _isSummarizing;
   List<WhisperSegment> get segments => _segments;
+  List<AudioEnergyFrame> get energyProfile => List.unmodifiable(_energyProfile);
   String? get summary => _summary;
   int get recognizeSession => _recognizeSession;
   List<int> get highlightedSegments => _highlightedSegments;
   List<ThemeGroup> get themeGroups => _themeGroups;
   String? get currentProjectPath => _currentProjectPath;
+  bool get isWaveformEditorVisible => _isWaveformEditorVisible;
   bool get isPlaying => _isPlaying;
   Duration get currentPosition => _currentPosition;
   Duration get totalDuration => _totalDuration;
@@ -147,6 +151,11 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  set energyProfile(List<AudioEnergyFrame> value) {
+    _energyProfile = value;
+    notifyListeners();
+  }
+
   set summary(String? value) {
     _summary = value;
     notifyListeners();
@@ -164,6 +173,12 @@ class AppState extends ChangeNotifier {
 
   set themeGroups(List<ThemeGroup> value) {
     _themeGroups = value;
+    notifyListeners();
+  }
+
+  set isWaveformEditorVisible(bool value) {
+    if (_isWaveformEditorVisible == value) return;
+    _isWaveformEditorVisible = value;
     notifyListeners();
   }
 
@@ -283,10 +298,12 @@ class AppState extends ChangeNotifier {
     _isRecognizing = false;
     _isSummarizing = false;
     _segments = [];
+    _energyProfile = [];
     _summary = null;
     _recognizeSession = 0;
     _highlightedSegments = [];
     _themeGroups = [];
+    _isWaveformEditorVisible = false;
     _currentProjectPath = null;
     _isPlaying = false;
     _currentPosition = Duration.zero;
@@ -326,10 +343,22 @@ class AppState extends ChangeNotifier {
   void resetRecognitionState() {
     _isRecognizing = false;
     _segments = [];
+    _energyProfile = [];
     _recognizeSession++;
     _highlightedSegments = [];
     _themeGroups = [];
+    _isWaveformEditorVisible = false;
     notifyListeners();
+  }
+
+  /// 주어진 구간에 해당하는 에너지 프레임을 반환 (startSec <= frame.time < endSec)
+  List<AudioEnergyFrame> getEnergyFramesInRange(double startSec, double endSec) {
+    if (_energyProfile.isEmpty || endSec <= startSec) {
+      return const <AudioEnergyFrame>[];
+    }
+    return _energyProfile
+        .where((frame) => frame.timeSec >= startSec && frame.timeSec <= endSec)
+        .toList(growable: false);
   }
 
   /// 요약 관련 상태 초기화

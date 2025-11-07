@@ -732,6 +732,10 @@ class _BestCutHomePageState extends State<BestCutHomePage> {
                     _appState.editingSegmentIndex = null;
                   },
                   onTogglePlayPause: () => _videoService.togglePlayPause(),
+                  onWaveformSeek: (seconds) {
+                    final duration = Duration(milliseconds: (seconds * 1000).round());
+                    _videoService.seekTo(duration);
+                  },
                 ),
     );
   }
