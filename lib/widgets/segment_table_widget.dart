@@ -225,6 +225,81 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     }
   }
   
+  Future<void> _handleTokenDoubleTap(int segmentIndex, int tokenIndex, WordSegment token) async {
+    final controller = TextEditingController(text: token.isSilence ? '' : token.word);
+    String? result;
+
+    result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text(token.isSilence ? '무음 칩 편집' : '단어 칩 편집'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: controller,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  hintText: '내용을 입력하세요 (빈 문자열 → 무음)',
+                ),
+                onSubmitted: (value) {
+                  Navigator.of(dialogContext).pop(value);
+                },
+              ),
+              const SizedBox(height: CursorTheme.spacingS),
+              const Text(
+                '입력을 비우면 무음으로 저장됩니다.',
+                style: TextStyle(fontSize: 12, color: CursorTheme.textSecondary),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('취소'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(controller.text),
+              child: const Text('저장'),
+            ),
+          ],
+        );
+      },
+    );
+
+    controller.dispose();
+
+    if (result == null) {
+      return;
+    }
+
+    final bool updated = widget.appState.updateWordToken(segmentIndex, tokenIndex, result);
+    if (!updated) {
+      _showSnackBar('변경 사항이 없습니다.');
+      return;
+    }
+
+    final updatedToken = widget.appState.segments[segmentIndex].words[tokenIndex];
+
+    setState(() {
+      if (updatedToken.isSilence) {
+        _selectedWordSegmentIndex = null;
+        _selectedWordIndex = null;
+        _selectedSilenceSegmentIndex = segmentIndex;
+        _selectedSilenceIndex = tokenIndex;
+      } else {
+        _selectedSilenceSegmentIndex = null;
+        _selectedSilenceIndex = null;
+        _selectedWordSegmentIndex = segmentIndex;
+        _selectedWordIndex = tokenIndex;
+      }
+    });
+
+    _showSnackBar(updatedToken.isSilence ? '🔇 무음으로 저장했습니다.' : '✏️ 단어를 수정했습니다.');
+  }
+
   // 무음 기준으로 세그먼트 분할 (무음 뒤에서 분할)
   bool _splitSegmentAtSilence(int segmentIndex, int silenceIndex) {
     final segment = widget.appState.segments[segmentIndex];
@@ -964,6 +1039,7 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
       message: '${_formatTimeFromSeconds(word.startSec)} ~ ${_formatTimeFromSeconds(word.endSec)}',
       child: GestureDetector(
         onTap: () => _handleWordTap(segmentIndex, segmentId, wordIndex, word),
+        onDoubleTap: () => _handleTokenDoubleTap(segmentIndex, wordIndex, word),
         behavior: HitTestBehavior.opaque,
         child: Container(
           padding: const EdgeInsets.symmetric(
@@ -1034,6 +1110,7 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
           '무음 ${silence.duration.toStringAsFixed(2)}초 (${_formatTimeFromSeconds(silence.startSec)} ~ ${_formatTimeFromSeconds(silence.endSec)})',
       child: GestureDetector(
         onTap: () => _handleSilenceTap(segmentIndex, silenceIndex, silence),
+        onDoubleTap: () => _handleTokenDoubleTap(segmentIndex, silenceIndex, silence),
         behavior: HitTestBehavior.opaque,
         child: Container(
           padding: const EdgeInsets.symmetric(

@@ -618,4 +618,65 @@ class AppState extends ChangeNotifier {
     notifyListeners();
     return true;
   }
+
+  /// 세그먼트 내 특정 토큰(단어/무음)을 편집
+  /// [segmentIndex]: 세그먼트 인덱스
+  /// [wordIndex]: 토큰 인덱스
+  /// [newContent]: 편집된 텍스트 (빈 문자열이면 무음으로 간주)
+  bool updateWordToken(int segmentIndex, int wordIndex, String newContent) {
+    if (segmentIndex < 0 || segmentIndex >= _segments.length) {
+      print('❌ 잘못된 세그먼트 인덱스: $segmentIndex');
+      return false;
+    }
+
+    final segment = _segments[segmentIndex];
+    if (wordIndex < 0 || wordIndex >= segment.words.length) {
+      print('❌ 잘못된 토큰 인덱스: $wordIndex (세그먼트 토큰 수: ${segment.words.length})');
+      return false;
+    }
+
+    final target = segment.words[wordIndex];
+    final trimmed = newContent.trim();
+    final bool makeSilence = trimmed.isEmpty;
+    final String finalWord = makeSilence ? '' : trimmed;
+
+    // 변경이 없는 경우 빠르게 종료
+    if (target.isSilence && makeSilence) {
+      print('ℹ️ 변경 없음: 이미 무음 토큰입니다.');
+      return false;
+    }
+    if (!target.isSilence && !makeSilence && target.word == finalWord) {
+      print('ℹ️ 변경 없음: 단어 내용이 동일합니다.');
+      return false;
+    }
+
+    final updatedToken = target.copyWith(
+      word: finalWord,
+      isSilence: makeSilence,
+    );
+
+    final List<WordSegment> updatedWords = List<WordSegment>.from(segment.words);
+    updatedWords[wordIndex] = updatedToken;
+
+    // 인덱스 재정렬
+    for (int i = 0; i < updatedWords.length; i++) {
+      updatedWords[i] = updatedWords[i].copyWith(index: i);
+    }
+
+    final updatedText = updatedWords
+        .where((w) => !w.isSilence)
+        .map((w) => w.word)
+        .join(' ')
+        .trim();
+
+    _segments[segmentIndex] = segment.copyWith(
+      words: updatedWords,
+      text: updatedText,
+    );
+
+    print('✏️ 토큰 편집 완료: segment=$segmentIndex word=$wordIndex → "${makeSilence ? '(무음)' : finalWord}"');
+
+    notifyListeners();
+    return true;
+  }
 } 
