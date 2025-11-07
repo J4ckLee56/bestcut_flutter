@@ -226,52 +226,22 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
   }
   
   Future<void> _handleTokenDoubleTap(int segmentIndex, int tokenIndex, WordSegment token) async {
-    final controller = TextEditingController(text: token.isSilence ? '' : token.word);
-    String? result;
-
-    result = await showDialog<String>(
+    final result = await showDialog<String>(
       context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: Text(token.isSilence ? '무음 칩 편집' : '단어 칩 편집'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(
-                controller: controller,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  hintText: '내용을 입력하세요 (빈 문자열 → 무음)',
-                ),
-                onSubmitted: (value) {
-                  Navigator.of(dialogContext).pop(value);
-                },
-              ),
-              const SizedBox(height: CursorTheme.spacingS),
-              const Text(
-                '입력을 비우면 무음으로 저장됩니다.',
-                style: TextStyle(fontSize: 12, color: CursorTheme.textSecondary),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('취소'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(controller.text),
-              child: const Text('저장'),
-            ),
-          ],
-        );
-      },
+      builder: (dialogContext) => _TokenEditDialog(
+        initialText: token.isSilence ? '' : token.word,
+        isSilence: token.isSilence,
+      ),
     );
 
-    controller.dispose();
+    if (result == null || !mounted) {
+      return;
+    }
 
-    if (result == null) {
+    // 다이얼로그가 완전히 닫힌 뒤에 반영되도록 다음 프레임으로 미룸
+    await Future<void>.delayed(Duration.zero);
+
+    if (!mounted) {
       return;
     }
 
@@ -283,21 +253,25 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
 
     final updatedToken = widget.appState.segments[segmentIndex].words[tokenIndex];
 
-    setState(() {
-      if (updatedToken.isSilence) {
-        _selectedWordSegmentIndex = null;
-        _selectedWordIndex = null;
-        _selectedSilenceSegmentIndex = segmentIndex;
-        _selectedSilenceIndex = tokenIndex;
-      } else {
-        _selectedSilenceSegmentIndex = null;
-        _selectedSilenceIndex = null;
-        _selectedWordSegmentIndex = segmentIndex;
-        _selectedWordIndex = tokenIndex;
-      }
-    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
 
-    _showSnackBar(updatedToken.isSilence ? '🔇 무음으로 저장했습니다.' : '✏️ 단어를 수정했습니다.');
+      setState(() {
+        if (updatedToken.isSilence) {
+          _selectedWordSegmentIndex = null;
+          _selectedWordIndex = null;
+          _selectedSilenceSegmentIndex = segmentIndex;
+          _selectedSilenceIndex = tokenIndex;
+        } else {
+          _selectedSilenceSegmentIndex = null;
+          _selectedSilenceIndex = null;
+          _selectedWordSegmentIndex = segmentIndex;
+          _selectedWordIndex = tokenIndex;
+        }
+      });
+
+      _showSnackBar(updatedToken.isSilence ? '🔇 무음으로 저장했습니다.' : '✏️ 단어를 수정했습니다.');
+    });
   }
 
   // 무음 기준으로 세그먼트 분할 (무음 뒤에서 분할)
@@ -1279,5 +1253,74 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     } else {
       return '${minutes.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}.${centiseconds.toString().padLeft(2, '0')}';
     }
+  }
+}
+
+class _TokenEditDialog extends StatefulWidget {
+  final String initialText;
+  final bool isSilence;
+
+  const _TokenEditDialog({
+    required this.initialText,
+    required this.isSilence,
+  });
+
+  @override
+  State<_TokenEditDialog> createState() => _TokenEditDialogState();
+}
+
+class _TokenEditDialogState extends State<_TokenEditDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialText);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    Navigator.of(context).pop(_controller.text);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.isSilence ? '무음 칩 편집' : '단어 칩 편집'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            decoration: const InputDecoration(
+              hintText: '내용을 입력하세요 (빈 문자열 → 무음)',
+            ),
+            onSubmitted: (_) => _submit(),
+          ),
+          const SizedBox(height: CursorTheme.spacingS),
+          const Text(
+            '입력을 비우면 무음으로 저장됩니다.',
+            style: TextStyle(fontSize: 12, color: CursorTheme.textSecondary),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('취소'),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          child: const Text('저장'),
+        ),
+      ],
+    );
   }
 }

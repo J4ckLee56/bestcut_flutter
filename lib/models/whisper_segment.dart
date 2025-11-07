@@ -75,12 +75,13 @@ class WordSegment {
 
   const WordSegment({
     required this.index,
-    required this.word,
+    required String word,
     required this.startSec,
     required this.endSec,
     required this.score,
-    this.isSilence = false, // 기본값: 일반 단어
-  });
+    bool isSilence = false, // 기본값: 일반 단어
+  })  : word = word,
+        isSilence = isSilence || word.isEmpty;
 
   /// 일반 단어인지 확인
   bool get isWord => !isSilence;
@@ -89,13 +90,14 @@ class WordSegment {
   double get duration => endSec - startSec;
 
   factory WordSegment.fromJson(Map<String, dynamic> json) {
+    final String word = json['word'] as String;
     return WordSegment(
       index: json['index'] as int,
-      word: json['word'] as String,
+      word: word,
       startSec: (json['startSec'] as num).toDouble(),
       endSec: (json['endSec'] as num).toDouble(),
       score: (json['score'] as num).toDouble(),
-      isSilence: json['isSilence'] as bool? ?? false,
+      isSilence: json['isSilence'] as bool? ?? word.isEmpty,
     );
   }
 
@@ -119,13 +121,15 @@ class WordSegment {
     double? score,
     bool? isSilence,
   }) {
+    final String newWord = word ?? this.word;
+    final bool newIsSilence = isSilence ?? this.isSilence || newWord.isEmpty;
     return WordSegment(
       index: index ?? this.index,
-      word: word ?? this.word,
+      word: newWord,
       startSec: startSec ?? this.startSec,
       endSec: endSec ?? this.endSec,
       score: score ?? this.score,
-      isSilence: isSilence ?? this.isSilence,
+      isSilence: newIsSilence,
     );
   }
 
