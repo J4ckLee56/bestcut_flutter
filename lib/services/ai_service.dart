@@ -37,6 +37,8 @@ class AIService {
   static const double _kMinimumWordDuration = 0.05; // 50ms
   static const double _kGapTolerance = 1e-6;
   static const double _kMinimumFfmpegSilenceDuration = 0.3;
+  static const double _kFfmpegSilenceMargin = 0.1; // FFmpeg 무음 결과 좌우 여유 (초)
+  static const double _kFfmpegBoundaryRespectTolerance = 0.005; // 5ms 이내면 조정 생략
   AIService(this.appState, this.context);
 
   double _floorToCentisecond(double value) => (value * 100).floorToDouble() / 100.0;
@@ -1614,20 +1616,17 @@ ${chunkOverviews.map((overview) => '''
       if (prevRef != null) {
         final prevWord = wordsPerSegment[prevRef.segmentIndex][prevRef.wordIndex];
         
-        // 에너지 조정된 타이밍을 최대한 존중하되, 무음 구간과 충돌 시만 조정
         double desiredEnd = _roundToCentisecond(finalSilenceStart);
-        
-        // 에너지 조정 타이밍이 무음 시작보다 앞에 있으면 그대로 유지
-        if (prevWord.endSec <= desiredEnd + 0.05) {
-          // 에너지 조정 결과를 존중 (±0.05초 이내면 유지)
+
+        final double delta = (desiredEnd - prevWord.endSec).abs();
+        if (delta <= _kFfmpegBoundaryRespectTolerance) {
           desiredEnd = prevWord.endSec;
           finalSilenceStart = desiredEnd;
-          
+
           if (kDebugMode) {
-            print('   ✓ FFmpeg 무음: 이전 단어 "${prevWord.word}" 종료 유지 ${prevWord.endSec.toStringAsFixed(2)}s (에너지 조정 존중)');
+            print('   ✓ FFmpeg 무음: 이전 단어 "${prevWord.word}" 종료 유지 ${prevWord.endSec.toStringAsFixed(2)}s (차이 ${delta.toStringAsFixed(3)}s)');
           }
         } else {
-          // 충돌: 무음 시작으로 조정 필요
           final double minAllowedEnd = prevWord.startSec + _kMinimumWordDuration;
           if (desiredEnd < minAllowedEnd) {
             desiredEnd = _roundToCentisecond(minAllowedEnd);
@@ -1660,20 +1659,17 @@ ${chunkOverviews.map((overview) => '''
       if (nextRef != null) {
         final nextWord = wordsPerSegment[nextRef.segmentIndex][nextRef.wordIndex];
         
-        // 에너지 조정된 타이밍을 최대한 존중하되, 무음 구간과 충돌 시만 조정
         double desiredStart = _roundToCentisecond(finalSilenceEnd);
-        
-        // 에너지 조정 타이밍이 무음 끝보다 뒤에 있으면 그대로 유지
-        if (nextWord.startSec >= desiredStart - 0.05) {
-          // 에너지 조정 결과를 존중 (±0.05초 이내면 유지)
+
+        final double delta = (desiredStart - nextWord.startSec).abs();
+        if (delta <= _kFfmpegBoundaryRespectTolerance) {
           desiredStart = nextWord.startSec;
           finalSilenceEnd = desiredStart;
-          
+
           if (kDebugMode) {
-            print('   ✓ FFmpeg 무음: 다음 단어 "${nextWord.word}" 시작 유지 ${nextWord.startSec.toStringAsFixed(2)}s (에너지 조정 존중)');
+            print('   ✓ FFmpeg 무음: 다음 단어 "${nextWord.word}" 시작 유지 ${nextWord.startSec.toStringAsFixed(2)}s (차이 ${delta.toStringAsFixed(3)}s)');
           }
         } else {
-          // 충돌: 무음 끝으로 조정 필요
           final double maxAllowedStart = nextWord.endSec - _kMinimumWordDuration;
           if (desiredStart < finalSilenceStart) {
             desiredStart = finalSilenceStart;
@@ -2499,14 +2495,22 @@ ${jsonEncode(formatted)}
       final endMatch = endRegex.firstMatch(line);
       if (endMatch != null && currentStart != null) {
         final end = double.parse(endMatch.group(1)!);
-        final duration = double.parse(endMatch.group(2)!);
-        
-        silences.add(SilenceSegment(
-          startSec: currentStart,
-          endSec: end,
-          duration: duration,
-        ));
-        
+        final rawDuration = double.parse(endMatch.group(2)!);
+
+        final double adjustedStart = (currentStart + _kFfmpegSilenceMargin).clamp(0.0, double.infinity);
+        final double adjustedEnd = math.max(adjustedStart, end - _kFfmpegSilenceMargin);
+        final double adjustedDuration = adjustedEnd - adjustedStart;
+
+        if (adjustedDuration > 0) {
+          silences.add(SilenceSegment(
+            startSec: adjustedStart,
+            endSec: adjustedEnd,
+            duration: adjustedDuration,
+          ));
+        } else if (kDebugMode) {
+          print('⚠️ FFmpeg 무음 구간이 너무 짧아 스킵: start=${currentStart.toStringAsFixed(2)} end=${end.toStringAsFixed(2)} (raw ${rawDuration.toStringAsFixed(2)}s)');
+        }
+
         currentStart = null;
       }
     }
@@ -3089,7 +3093,9 @@ ${jsonEncode(formatted)}
         double start = word.startSec;
 
         if (lastWordEnd != null) {
-          if (start - lastWordEnd! > _kGapTolerance &&
+          if (start < lastWordEnd! - _kGapTolerance) {
+            start = lastWordEnd!;
+          } else if (start - lastWordEnd! > _kGapTolerance &&
               !_hasSilenceCoveringGap(allSilences, lastWordEnd!, start)) {
             start = lastWordEnd!;
           }
