@@ -320,8 +320,18 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
     if (splitIndex >= segment.words.length) {
       if (kDebugMode) {
         print('❌ 무음 뒤에 이어지는 토큰이 없어 분할할 수 없습니다.');
+        print('  → 무음 보장 세그먼트 생성 로직 수행');
       }
-      return false;
+
+      final firstWords = segment.words.sublist(0, silenceIndex + 1);
+      if (firstWords.length == segment.words.length) {
+        if (kDebugMode) {
+          print('⚠️ 분할 결과 두 번째 세그먼트가 비게 되므로 취소합니다.');
+        }
+        return false;
+      }
+
+      return widget.appState.splitSegmentAtWord(segmentIndex, firstWords.length);
     }
     
     if (kDebugMode) {

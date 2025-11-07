@@ -73,15 +73,15 @@ class WordSegment {
   final double score;
   final bool isSilence; // 무음 여부 (word == "" 이면 true)
 
-  const WordSegment({
+  WordSegment({
     required this.index,
     required String word,
     required this.startSec,
     required this.endSec,
     required this.score,
-    bool isSilence = false, // 기본값: 일반 단어
+    bool? isSilence, // 기본값: 자동 판별
   })  : word = word,
-        isSilence = isSilence || word.isEmpty;
+        isSilence = isSilence ?? word.isEmpty;
 
   /// 일반 단어인지 확인
   bool get isWord => !isSilence;
@@ -122,7 +122,7 @@ class WordSegment {
     bool? isSilence,
   }) {
     final String newWord = word ?? this.word;
-    final bool newIsSilence = isSilence ?? this.isSilence || newWord.isEmpty;
+    final bool newIsSilence = isSilence ?? (word != null ? newWord.isEmpty : this.isSilence);
     return WordSegment(
       index: index ?? this.index,
       word: newWord,
