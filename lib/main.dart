@@ -638,44 +638,44 @@ class _BestCutHomePageState extends State<BestCutHomePage> {
                   onStartProcessing: _startProcessing,
                 )
               : MainContentWidget(
-                  appState: _appState,
-                  buildContainerDecoration: _buildContainerDecoration,
-                  onPickVideo: () => _videoService.pickVideo(),
-                  onRecognizeSpeech: () => _aiService.recognizeSpeech(),
-                  onSummarizeScript: () => _aiService.summarizeScript(),
-                  onSegmentTap: (index) {
-                    // 세그먼트 탭 로직
-                    if (index >= 0 && index < _appState.segments.length) {
-                      final segment = _appState.segments[index];
+              appState: _appState,
+              buildContainerDecoration: _buildContainerDecoration,
+              onPickVideo: () => _videoService.pickVideo(),
+                      onRecognizeSpeech: () => _aiService.recognizeSpeech(),
+        onSummarizeScript: () => _aiService.summarizeScript(),
+                          onSegmentTap: (index) {
+              // 세그먼트 탭 로직
+              if (index >= 0 && index < _appState.segments.length) {
+                final segment = _appState.segments[index];
 
-                      print('🖱️ 세그먼트 ${index + 1} 클릭됨 (ID: ${segment.id})');
+                print('🖱️ 세그먼트 ${index + 1} 클릭됨 (ID: ${segment.id})');
 
-                      // 재생 중이면 즉시 일시정지
-                      if (_appState.isPlaying && _appState.videoController != null) {
-                        _appState.videoController!.pause();
-                        _appState.isPlaying = false;
-                        print('⏸️ 재생 중지 (세그먼트 클릭으로 인한)');
-                      }
+                // 재생 중이면 즉시 일시정지
+                if (_appState.isPlaying && _appState.videoController != null) {
+                  _appState.videoController!.pause();
+                  _appState.isPlaying = false;
+                  print('⏸️ 재생 중지 (세그먼트 클릭으로 인한)');
+                }
 
-                      // 현재 세그먼트 인덱스 업데이트
-                      _appState.currentSegmentIndex = index;
-
-                      // 요약 모드일 때는 요약 세그먼트 인덱스도 업데이트
-                      if (_appState.isPreviewMode) {
-                        _appState.updateCurrentSummarySegmentIndex(index);
-                      }
-
-                      // 비디오 재생 위치 이동
+                // 현재 세그먼트 인덱스 업데이트
+                _appState.currentSegmentIndex = index;
+                
+                // 요약 모드일 때는 요약 세그먼트 인덱스도 업데이트
+                if (_appState.isPreviewMode) {
+                  _appState.updateCurrentSummarySegmentIndex(index);
+                }
+                
+                // 비디오 재생 위치 이동
                       _videoService.seekTo(
                         Duration(milliseconds: (segment.startSec * 1000).round()),
                       );
-
-                      print('🎯 세그먼트 ${index + 1}로 이동 및 하이라이트');
-
-                      // UI 업데이트
-                      _appState.notifyListeners();
-                    }
-                  },
+                
+                print('🎯 세그먼트 ${index + 1}로 이동 및 하이라이트');
+                
+                // UI 업데이트
+                _appState.notifyListeners();
+              }
+            },
                   onWordTap: (segmentIndex, WordSegment word) {
                     if (segmentIndex >= 0 && segmentIndex < _appState.segments.length) {
                       final targetPosition =
@@ -702,41 +702,41 @@ class _BestCutHomePageState extends State<BestCutHomePage> {
                       _videoService.seekTo(targetPosition);
                     }
                   },
-                  onSegmentSecondaryTap: (index) {
-                    // 요약 세그먼트 토글 로직
-                    final currentSegments = _appState.segments;
-                    if (index >= 0 && index < currentSegments.length) {
-                      final segment = currentSegments[index];
-                      final highlightedSegments = _appState.highlightedSegments;
-
-                      if (highlightedSegments.contains(segment.id)) {
-                        highlightedSegments.remove(segment.id);
-                      } else {
-                        highlightedSegments.add(segment.id);
-                      }
-
-                      _appState.highlightedSegments = highlightedSegments;
-                    }
-                  },
-                  onSegmentDoubleTap: (index) {
-                    // 세그먼트 편집 시작 로직
-                    _appState.editingSegmentIndex = index;
-                  },
-                  onFinishEditing: (index, newText) {
-                    // 세그먼트 편집 완료 로직
-                    final currentSegments = _appState.segments;
-                    if (index >= 0 && index < currentSegments.length) {
-                      currentSegments[index] = currentSegments[index].copyWith(text: newText);
-                      _appState.segments = currentSegments;
-                    }
-                    _appState.editingSegmentIndex = null;
-                  },
-                  onTogglePlayPause: () => _videoService.togglePlayPause(),
+              onSegmentSecondaryTap: (index) {
+                // 요약 세그먼트 토글 로직
+                final currentSegments = _appState.segments;
+                if (index >= 0 && index < currentSegments.length) {
+                  final segment = currentSegments[index];
+                  final highlightedSegments = _appState.highlightedSegments;
+                  
+                  if (highlightedSegments.contains(segment.id)) {
+                    highlightedSegments.remove(segment.id);
+            } else {
+                    highlightedSegments.add(segment.id);
+                  }
+                  
+                  _appState.highlightedSegments = highlightedSegments;
+                }
+              },
+              onSegmentDoubleTap: (index) {
+                // 세그먼트 편집 시작 로직
+                _appState.editingSegmentIndex = index;
+              },
+              onFinishEditing: (index, newText) {
+                // 세그먼트 편집 완료 로직
+                final currentSegments = _appState.segments;
+                if (index >= 0 && index < currentSegments.length) {
+                  currentSegments[index] = currentSegments[index].copyWith(text: newText);
+                  _appState.segments = currentSegments;
+                }
+          _appState.editingSegmentIndex = null;
+        },
+        onTogglePlayPause: () => _videoService.togglePlayPause(),
                   onWaveformSeek: (seconds) {
                     final duration = Duration(milliseconds: (seconds * 1000).round());
                     _videoService.seekTo(duration);
                   },
-                ),
+      ),
     );
   }
 

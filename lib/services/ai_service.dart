@@ -37,6 +37,91 @@ class _EnergyBucket {
   double get average => _count == 0 ? 0.0 : _sum / _count;
 }
 
+class _MeaningUnit {
+  _MeaningUnit({
+    required this.id,
+    required List<int> segmentIds,
+    required this.startSec,
+    required this.endSec,
+    required this.text,
+    required List<String> tokens,
+  })  : segmentIds = List<int>.from(segmentIds),
+        tokens = List<String>.from(tokens);
+
+  int id;
+  final List<int> segmentIds;
+  double startSec;
+  double endSec;
+  String text;
+  final List<String> tokens;
+  Map<String, double> tfidfVector = <String, double>{};
+  double tfidfScore = 0.0;
+  double centrality = 0.0;
+  double importance = 0.0;
+
+  double get duration => (endSec - startSec).clamp(0.0, double.infinity);
+
+  _MeaningUnit mergeWith(_MeaningUnit other, int newId) {
+    final mergedSegments = <int>{...segmentIds, ...other.segmentIds}.toList()
+      ..sort();
+    final mergedTokens = <String>[...tokens, ...other.tokens];
+    final mergedText = [text, other.text]
+        .where((value) => value.trim().isNotEmpty)
+        .join(' ')
+        .trim();
+
+    return _MeaningUnit(
+      id: newId,
+      segmentIds: mergedSegments,
+      startSec: math.min(startSec, other.startSec),
+      endSec: math.max(endSec, other.endSec),
+      text: mergedText,
+      tokens: mergedTokens,
+    );
+  }
+}
+
+class _SummarySelectionResult {
+  const _SummarySelectionResult({
+    required this.selectedUnits,
+    required this.selectedSegmentIds,
+  });
+
+  final List<_MeaningUnit> selectedUnits;
+  final Set<int> selectedSegmentIds;
+}
+
+class _ChapterCandidate {
+  _ChapterCandidate(this.index);
+
+  final int index;
+  final List<_MeaningUnit> units = [];
+  final Map<String, double> _vectorSum = <String, double>{};
+
+  void addUnit(_MeaningUnit unit) {
+    units.add(unit);
+    unit.tfidfVector.forEach((token, weight) {
+      _vectorSum[token] = (_vectorSum[token] ?? 0.0) + weight;
+    });
+  }
+
+  Map<String, double> get centroid {
+    if (units.isEmpty) {
+      return const <String, double>{};
+    }
+    final count = units.length.toDouble();
+    final Map<String, double> result = <String, double>{};
+    _vectorSum.forEach((token, sum) {
+      result[token] = sum / count;
+    });
+    return result;
+  }
+
+  double get startSec => units.isEmpty ? 0.0 : units.first.startSec;
+  double get endSec => units.isEmpty ? 0.0 : units.last.endSec;
+  double get duration => endSec - startSec;
+}
+
 class AIService {
   final AppState appState;
   final BuildContext context;
@@ -54,6 +139,41 @@ class AIService {
   static const double _kMinimumFfmpegSilenceDuration = 0.3;
   static const double _kFfmpegSilenceMargin = 0.1; // FFmpeg 무음 결과 좌우 여유 (초)
   static const double _kFfmpegBoundaryRespectTolerance = 0.005; // 5ms 이내면 조정 생략
+  static const double _kSummaryTargetRatio = 0.35;
+  static const double _kSummaryMinRatio = 0.2;
+  static const double _kSummaryMaxRatio = 0.5;
+  static const double _kMinUnitDuration = 1.5;
+  static const double _kMaxMergeGap = 2.0;
+  static const double _kChapterSimilarityThreshold = 0.22;
+  static const double _kChapterGapSeconds = 25.0;
+  static const double _kSummaryBridgeThreshold = 0.35;
+  static const double _kSummaryMaxGapSeconds = 20.0;
+  static const double _kContextGapSeconds = 6.0;
+  static const int _kDesiredChapterCount = 6;
+  static const double _kSummaryInitialOvershootRatio = 0.35;
+  static const int _kSummaryMinUnitCount = 8;
+  static const int _kSummaryMaxUnitCount = 80;
+  static const int _kSummaryContextNeighborLimit = 1;
+  static const double _kSummaryMaxSegmentRatio = 0.35;
+  static const int _kSummaryTimeWindows = 8;
+  static const double _kSummaryTimeDiversityWeight = 0.3;
+  static const Set<String> _kStopWords = {
+    '그리고', '그러나', '하지만', '그러면서', '그러니까', '그래서', '그래도', '거든요', '거든',
+    '이런', '저런', '그런', '어떤', '있는', '없는', '합니다', '합니다만', '입니다', '입니다만',
+    '하게', '하면', '해서', '하고', '하며', '거나', '부터', '까지', '대한', '대해',
+    '위해', '우리', '여러', '또', '또한', '또는', '즉', '및', '등', '처럼', '같은', '거의',
+    '정말', '아주', '매우', '지금', '이번', '오늘', '어제', '내일', '여기', '저기', '거기',
+    '입니다요', '합니다요', '사실', '정도', '부분', '이제', '때문', '때문에', '그럼', '그러면',
+    '자', '음', '어', '어우', '어음', '뭐', '뭔가', '좀', '조금', '그냥', '요', '는', '은', '이',
+    '가', '을', '를', '과', '와', '에', '도', '의', '로', '으로', '에서', '이다', '있다',
+    '됐다', '된다', '그렇지만', '대략', '약간', '혹시', '혹은', '아니면', 'if', 'the', 'and',
+    'but', 'or', 'so', 'also', 'very', 'really', 'just', 'only', 'maybe', 'about', 'this', 'that',
+    'with', 'from', 'into', 'being', 'been', 'have', 'has', 'will', 'would', 'could', 'should',
+    'can', 'might', 'must', 'do', 'does', 'did', 'done', 'each', 'other', 'such', 'than', 'too',
+    'over', 'under', 'again', 'more', 'most', 'many', 'much', 'any', 'some', 'like'
+  };
+  static final RegExp _kSentenceBoundaryPattern = RegExp(r'[.!?…]+$');
+  static final RegExp _kWordCleanupPattern = RegExp(r'[^0-9a-zA-Z가-힣]+');
   AIService(this.appState, this.context);
 
   double _floorToCentisecond(double value) => (value * 100).floorToDouble() / 100.0;
@@ -514,165 +634,350 @@ class AIService {
     }
   }
 
-  // 내용 요약 시작
+  // 내용 요약 시작 (GPT 기반)
   Future<void> summarizeScript() async {
     if (appState.segments.isEmpty) return;
     
-    // 이미 요약이 진행 중이면 중복 실행 방지
     if (appState.isSummarizing) {
       if (kDebugMode) print('✅ AIService: 이미 요약이 진행 중 - 중복 실행 방지');
       return;
     }
     
-    // 인증 체크
     _checkAuthentication();
     
-    // 이미 취소된 상태라면 작업 시작하지 않음
     if (_isCancelled || appState.isOperationCancelled) {
       if (kDebugMode) print('✅ AIService: 이미 취소된 상태 - 요약 작업 시작 안함');
       return;
     }
     
     appState.isSummarizing = true;
-    
-    try {
-      // 진행도 다이얼로그 표시
 
-      // 청크 단위 처리 적용
-      print('=== 청크 단위 처리 시작 ===');
-      
-      // 진행 상황 업데이트
-      if (appState.progressStreamController != null && !appState.progressStreamController!.isClosed) {
-        appState.progressStreamController!.add('전체 스크립트를 분석 가능한 청크로 나누고 있습니다...');
+    final progressController = appState.progressStreamController;
+    final authService = AuthService();
+    final functionsService = FirebaseFunctionsService();
+    
+    void updateProgress(String message) {
+      if (progressController != null && !progressController.isClosed) {
+        progressController.add(message);
       }
-      
-      // 취소 체크
+      if (kDebugMode) print('📌 요약 진행: $message');
+    }
+
+    try {
+      // Phase 1: 로컬 전처리
+      updateProgress('의미 단위를 구성하고 있습니다...');
+      _checkCancellation();
+      final meaningUnits = _buildMeaningUnits(appState.segments);
+      if (meaningUnits.isEmpty) {
+        throw StateError('요약할 의미 단위를 생성할 수 없습니다.');
+      }
+
+      updateProgress('의미 단위 중요도를 분석하고 있습니다...');
+      _checkCancellation();
+      _computeMeaningUnitStatistics(meaningUnits);
+
+      // Phase 2: GPT 기반 챕터 분할
+      final idToken = await authService.getIdToken();
+      if (idToken == null) {
+        throw StateError('인증 토큰을 가져올 수 없습니다.');
+      }
+
+      updateProgress('챕터를 분할하고 있습니다...');
       _checkCancellation();
       
-      final chunks = _createChunks(appState.segments);
-      print('생성된 청크 수: ${chunks.length}');
-      
-      // 1단계: 각 청크별 개요 파악
-      print('=== STEP 1: 청크별 개요 파악 시작 ===');
-      
-      // 취소 상태 직접 확인
-        if (_isCancelled || appState.isOperationCancelled) {
-          if (kDebugMode) print('✅ AIService: STEP 1에서 작업 취소됨');
-          appState.isSummarizing = false;
-        return;
+      final segmentsData = appState.segments.map((s) => <String, dynamic>{
+        'id': s.id,
+        'startSec': s.startSec,
+        'endSec': s.endSec,
+        'text': s.text,
+      }).toList();
+
+      final chapterSegmentationResult = await functionsService.segmentChaptersWithGPT(
+        segments: segmentsData,
+        idToken: idToken,
+        desiredChapterCount: _kDesiredChapterCount,
+      );
+
+      List<Map<String, dynamic>> gptChapters = [];
+      if (chapterSegmentationResult['success'] == true && 
+          chapterSegmentationResult['data'] != null) {
+        final data = chapterSegmentationResult['data'] as Map<String, dynamic>;
+        if (data['chapters'] != null) {
+          gptChapters = List<Map<String, dynamic>>.from(data['chapters'] as List);
+        }
       }
-      
-      List<Map<String, dynamic>> chunkOverviews = [];
-      for (int i = 0; i < chunks.length; i++) {
-        // 취소 상태 직접 확인
-          if (_isCancelled || appState.isOperationCancelled) {
-            if (kDebugMode) print('✅ AIService: STEP 1 루프에서 작업 취소됨');
-            appState.isSummarizing = false;
-          return;
+
+      // GPT 챕터 분할 실패 시 로컬 폴백
+      if (gptChapters.isEmpty) {
+        if (kDebugMode) {
+          print('⚠️ GPT 챕터 분할 실패, 로컬 폴백 사용');
+        }
+        final localChapters = _buildChaptersFromUnits(meaningUnits, appState.segments);
+        if (localChapters.isEmpty) {
+          throw StateError('챕터를 생성할 수 없습니다.');
         }
         
-        print('--- Processing Chunk ${i + 1}/${chunks.length} ---');
-        final overview = await _getChunkOverview(chunks[i], i + 1, chunks.length, '', Uri());
-        chunkOverviews.add(overview);
-      }
-      
-      // 2단계: 전체 구조 통합
-      print('=== STEP 2: 전체 구조 통합 시작 ===');
-      
-      // 취소 상태 직접 확인
-      if (_isCancelled || appState.isOperationCancelled) {
-        if (kDebugMode) print('✅ AIService: STEP 2에서 작업 취소됨');
-        appState.isSummarizing = false;
-        return;
-      }
-      
-      final overallStructure = await _integrateChunkOverviews(chunkOverviews, '', Uri());
-      print('=== STEP 2 완료: 전체 구조 통합 ===');
-      print('Overall Structure: $overallStructure');
-
-      // 3단계: 주제별로 세그먼트 그룹화
-      print('=== STEP 3: 주제별 세그먼트 그룹화 시작 ===');
-      
-      // 취소 상태 직접 확인
-      if (_isCancelled || appState.isOperationCancelled) {
-        if (kDebugMode) print('✅ AIService: STEP 3에서 작업 취소됨');
-        appState.isSummarizing = false;
-        return;
-      }
-      
-      final themeGroups = await _groupSegmentsByTheme(appState.segments, overallStructure);
-      print('=== STEP 3 완료: ${themeGroups.length}개 주제 그룹 생성 ===');
-      for (int i = 0; i < themeGroups.length; i++) {
-        print('Group ${i + 1}: ${themeGroups[i].segments.length} segments)');
-      }
-      
-      appState.themeGroups = themeGroups;
-
-      // 4단계: 각 주제별 세부 요약
-      print('=== STEP 4: 주제별 세부 요약 시작 ===');
-      
-      // 취소 상태 직접 확인
-      if (_isCancelled || appState.isOperationCancelled) {
-        if (kDebugMode) print('✅ AIService: STEP 4에서 작업 취소됨');
-        appState.isSummarizing = false;
-        return;
-      }
-      
-      List<int> allSelectedIds = [];
-      for (int i = 0; i < themeGroups.length; i++) {
-        // 취소 상태 직접 확인
-          if (_isCancelled || appState.isOperationCancelled) {
-            if (kDebugMode) print('✅ AIService: STEP 4 루프에서 작업 취소됨');
-            appState.isSummarizing = false;
-          return;
+        // 로컬 챕터를 GPT 형식으로 변환
+        for (int i = 0; i < localChapters.length; i++) {
+          final localChapter = localChapters[i];
+          if (localChapter.segments.isEmpty) continue;
+          final keywords = localChapter.keywords.isNotEmpty 
+              ? localChapter.keywords 
+              : _extractTopKeywordsFromSegments(localChapter.segments);
+          gptChapters.add({
+            'chapter_index': i + 1,
+            'start_segment_id': localChapter.segments.first.id,
+            'end_segment_id': localChapter.segments.last.id,
+            'main_topic': localChapter.theme.isNotEmpty 
+                ? localChapter.theme 
+                : _buildChapterTitle(keywords, i + 1),
+            'key_points': keywords,
+          });
         }
-        
-        final group = themeGroups[i];
-        print('--- Processing Theme Group ${i + 1}: ${group.theme} ---');
-        final selectedIds = await _summarizeThemeGroup(group, '', Uri());
-        print('Selected IDs for ${group.theme}: $selectedIds');
-        allSelectedIds.addAll(selectedIds);
       }
 
-      // 5단계: 중복 제거 및 최종 정리
-      print('=== STEP 5: 중복 제거 및 최종 정리 ===');
-      
-      // 취소 상태 직접 확인
-      if (_isCancelled || appState.isOperationCancelled) {
-        if (kDebugMode) print('✅ AIService: STEP 5에서 작업 취소됨');
-        appState.isSummarizing = false;
-        return;
+      if (kDebugMode) {
+        print('📊 챕터 분할 완료: ${gptChapters.length}개 챕터');
+        for (final ch in gptChapters) {
+          print('   챕터 ${ch['chapter_index']}: ${ch['start_segment_id']} ~ ${ch['end_segment_id']} - ${ch['main_topic']}');
+        }
       }
-      
-      // 중복 제거
-      final uniqueSelectedIds = allSelectedIds.toSet().toList();
-      print('중복 제거 후 선택된 세그먼트 수: ${uniqueSelectedIds.length}');
-      
-      // 선택된 세그먼트들을 하이라이트
-      appState.highlightedSegments = uniqueSelectedIds;
-      
-      // 최종 요약 텍스트 생성
-      final finalSummary = await _generateFinalSummary(uniqueSelectedIds, '', Uri());
-      appState.summary = finalSummary;
-      
-      print('=== 최종 요약 완료 ===');
-      print('선택된 세그먼트 수: ${uniqueSelectedIds.length}');
-      print('최종 요약 길이: ${finalSummary.length}');
+
+      // Phase 3: GPT 기반 챕터 분석 및 요약 세그먼트 선정
+      final List<ThemeGroup> finalChapters = [];
+      final Set<int> allSelectedSegmentIds = <int>{};
+      final Map<int, String> chapterSummaries = {};
+
+      for (int i = 0; i < gptChapters.length; i++) {
+        _checkCancellation();
+        final gptChapter = gptChapters[i];
+        final startSegmentId = gptChapter['start_segment_id'] as int;
+        final endSegmentId = gptChapter['end_segment_id'] as int;
+        
+        // 챕터에 해당하는 세그먼트 추출
+        final chapterSegments = appState.segments
+            .where((s) => s.id >= startSegmentId && s.id <= endSegmentId)
+            .toList()
+          ..sort((a, b) => a.startSec.compareTo(b.startSec));
+        
+        if (chapterSegments.isEmpty) {
+          if (kDebugMode) {
+            print('⚠️ 챕터 ${i + 1}: 세그먼트를 찾을 수 없음 (${startSegmentId} ~ ${endSegmentId})');
+          }
+          continue;
+        }
+
+        updateProgress('챕터 ${i + 1}/${gptChapters.length} 분석 중...');
+        
+        // 청크 크기 제한 (최대 100개 세그먼트)
+        final int maxSegmentsPerChunk = 100;
+        final List<List<WhisperSegment>> chunks = [];
+        
+        for (int j = 0; j < chapterSegments.length; j += maxSegmentsPerChunk) {
+          final end = math.min(j + maxSegmentsPerChunk, chapterSegments.length);
+          chunks.add(chapterSegments.sublist(j, end));
+        }
+
+        String? previousSummary;
+        if (i > 0 && chapterSummaries.containsKey(i - 1)) {
+          previousSummary = chapterSummaries[i - 1];
+        }
+
+        String? nextPreview;
+        if (i < gptChapters.length - 1) {
+          final nextChapter = gptChapters[i + 1];
+          final nextStartId = nextChapter['start_segment_id'] as int;
+          final nextEndId = nextChapter['end_segment_id'] as int;
+          final nextSegments = appState.segments
+              .where((s) => s.id >= nextStartId && s.id <= nextEndId)
+              .take(5)
+              .toList();
+          if (nextSegments.isNotEmpty) {
+            final nextText = nextSegments.map((s) => s.text).join(' ');
+            nextPreview = nextText.substring(0, math.min(200, nextText.length));
+          }
+        }
+
+        // 각 청크를 GPT에 전달
+        final Set<int> chunkSelectedIds = <int>{};
+        String? chunkSummary;
+        String? chunkTopic;
+        List<String> chunkKeyPoints = [];
+
+        for (int chunkIdx = 0; chunkIdx < chunks.length; chunkIdx++) {
+          final chunk = chunks[chunkIdx];
+          final segmentsData = chunk.map((s) => <String, dynamic>{
+            'id': s.id,
+            'startSec': s.startSec,
+            'endSec': s.endSec,
+            'text': s.text,
+          }).toList();
+
+          final result = await functionsService.analyzeChapterWithGPT(
+            chapterIndex: i + 1,
+            segments: segmentsData,
+            idToken: idToken,
+            previousChapterSummary: chunkIdx == 0 ? previousSummary : null,
+            nextChapterPreview: chunkIdx == chunks.length - 1 ? nextPreview : null,
+          );
+
+          if (result['success'] == true && result['data'] != null) {
+            final data = result['data'] as Map<String, dynamic>;
+            
+            if (chunkIdx == 0) {
+              chunkTopic = data['main_topic'] as String?;
+              if (data['key_points'] != null) {
+                chunkKeyPoints = List<String>.from(data['key_points'] as List);
+              }
+            }
+            
+            if (data['summary'] != null) {
+              final summary = data['summary'] as String;
+              chunkSummary = chunkSummary == null ? summary : '$chunkSummary $summary';
+            }
+
+            // 중요 범위 처리
+            if (data['important_range'] != null) {
+              final range = data['important_range'] as Map<String, dynamic>;
+              final startId = range['start_segment_id'] as int?;
+              final endId = range['end_segment_id'] as int?;
+              
+              if (startId != null && endId != null) {
+                for (final segment in chunk) {
+                  if (segment.id >= startId && segment.id <= endId) {
+                    chunkSelectedIds.add(segment.id);
+                  }
+                }
+              }
+            }
+
+            // 제외 세그먼트 처리
+            if (data['exclude_segments'] != null) {
+              final excludeIds = List<int>.from(data['exclude_segments'] as List);
+              for (final excludeId in excludeIds) {
+                chunkSelectedIds.remove(excludeId);
+              }
+            }
+
+            // 반복 그룹 처리
+            if (data['repetition_groups'] != null) {
+              final groups = data['repetition_groups'] as List;
+              for (final group in groups) {
+                final groupMap = group as Map<String, dynamic>;
+                final segments = List<int>.from(groupMap['segments'] as List);
+                final keep = groupMap['keep'] as int?;
+                
+                if (keep != null) {
+                  for (final segId in segments) {
+                    if (segId != keep) {
+                      chunkSelectedIds.remove(segId);
+                    }
+                  }
+                }
+              }
+            }
+          } else {
+            if (kDebugMode) {
+              print('⚠️ 챕터 ${i + 1} 청크 ${chunkIdx + 1} GPT 분석 실패, 로컬 폴백 사용');
+            }
+            // 로컬 폴백: 중요도 기반 선택
+            final sortedChunk = List<WhisperSegment>.from(chunk)
+              ..sort((a, b) {
+                final aUnit = meaningUnits.firstWhere((u) => u.segmentIds.contains(a.id), orElse: () => meaningUnits.first);
+                final bUnit = meaningUnits.firstWhere((u) => u.segmentIds.contains(b.id), orElse: () => meaningUnits.first);
+                return bUnit.importance.compareTo(aUnit.importance);
+              });
+            
+            final selectCount = math.min((chunk.length * 0.3).round(), chunk.length);
+            for (int k = 0; k < selectCount; k++) {
+              chunkSelectedIds.add(sortedChunk[k].id);
+            }
+          }
+        }
+
+        allSelectedSegmentIds.addAll(chunkSelectedIds);
+        
+        // 챕터 정보 구성
+        final selectedSegments = chapterSegments
+            .where((s) => chunkSelectedIds.contains(s.id))
+            .toList()
+          ..sort((a, b) => a.startSec.compareTo(b.startSec));
+
+        if (selectedSegments.isEmpty) {
+          // 선택된 세그먼트가 없으면 상위 30% 선택
+          final sorted = List<WhisperSegment>.from(chapterSegments)
+            ..sort((a, b) {
+              final aUnit = meaningUnits.firstWhere((u) => u.segmentIds.contains(a.id), orElse: () => meaningUnits.first);
+              final bUnit = meaningUnits.firstWhere((u) => u.segmentIds.contains(b.id), orElse: () => meaningUnits.first);
+              return bUnit.importance.compareTo(aUnit.importance);
+            });
+          final selectCount = math.max(1, (sorted.length * 0.3).round());
+          for (int k = 0; k < selectCount; k++) {
+            allSelectedSegmentIds.add(sorted[k].id);
+            selectedSegments.add(sorted[k]);
+          }
+        }
+
+        // GPT에서 가져온 챕터 정보 사용
+        final gptMainTopic = gptChapter['main_topic'] as String?;
+        final gptKeyPoints = gptChapter['key_points'] != null 
+            ? List<String>.from(gptChapter['key_points'] as List)
+            : <String>[];
+        
+        final chapterTitle = chunkTopic ?? gptMainTopic ?? _buildChapterTitle(
+          chunkKeyPoints.isNotEmpty ? chunkKeyPoints : gptKeyPoints, 
+          i + 1
+        );
+        final chapterSummary = chunkSummary ?? _buildChapterSummaryFromSegments(selectedSegments);
+        
+        chapterSummaries[i] = chapterSummary;
+
+        finalChapters.add(ThemeGroup(
+          theme: chapterTitle,
+          segments: selectedSegments,
+          summary: chapterSummary,
+          keywords: chunkKeyPoints.isNotEmpty 
+              ? chunkKeyPoints 
+              : (gptKeyPoints.isNotEmpty 
+                  ? gptKeyPoints 
+                  : _extractTopKeywordsFromSegments(selectedSegments)),
+        ));
+      }
+
+      // Phase 4: 최종 정리
+      updateProgress('최종 요약을 정리하고 있습니다...');
+      _checkCancellation();
+
+      final selectedSegmentIdsList = allSelectedSegmentIds.toList()..sort();
+      final selectedSegments = appState.segments
+          .where((s) => allSelectedSegmentIds.contains(s.id))
+          .toList()
+        ..sort((a, b) => a.startSec.compareTo(b.startSec));
+
+      final summaryText = _composeSummaryTextFromChapters(finalChapters);
+
+      final updatedSegments = appState.segments.map((segment) {
+        final isSummary = allSelectedSegmentIds.contains(segment.id);
+        return segment.copyWith(isSummary: isSummary);
+      }).toList();
+
+      appState.segments = updatedSegments;
+      appState.themeGroups = finalChapters;
+      appState.highlightedSegments = selectedSegmentIdsList;
+      appState.summary = summaryText;
       
       appState.isSummarizing = false;
       
-      // 크레딧 차감 및 데이터 저장
-      await _handleSummarizeCompletion(uniqueSelectedIds, finalSummary);
+      await _handleSummarizeCompletion(selectedSegmentIdsList, summaryText);
       
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('내용 요약이 성공적으로 완료되었습니다! (${uniqueSelectedIds.length}개 세그먼트 선택)')),
+        SnackBar(content: Text('내용 요약이 성공적으로 완료되었습니다! (${selectedSegmentIdsList.length}개 세그먼트 선택, ${finalChapters.length}개 챕터)')),
       );
-      
     } catch (e) {
       if (e is CancellationException) {
         if (kDebugMode) print('✅ AIService: 요약 작업이 취소됨');
         appState.isSummarizing = false;
-        return; // 취소된 경우 조용히 종료
+        return;
       }
       
       print('요약 작업 중 오류: $e');
@@ -681,15 +986,1039 @@ class AIService {
         SnackBar(content: Text('요약 작업 중 오류가 발생했습니다: $e')),
       );
     } finally {
-      // 작업 완료 처리
       _completeOperation();
     }
   }
 
-  // TODO: 나머지 헬퍼 메서드들 구현 필요
-  // _callLocalWhisper, _createChunks, _getChunkOverview, _integrateChunkOverviews,
-  // _groupSegmentsByTheme, _summarizeThemeGroup, _generateFinalSummary,
-  
+  List<_MeaningUnit> _buildMeaningUnits(List<WhisperSegment> segments) {
+    final List<_MeaningUnit> units = [];
+    int nextId = 1;
+
+    for (final segment in segments) {
+      _checkCancellation();
+      final speechWords = segment.words.where((word) => !word.isSilence).toList();
+
+      if (speechWords.isEmpty) {
+        final text = segment.text.trim();
+        if (text.isEmpty) {
+          continue;
+        }
+
+        final tokens = _tokenize(text);
+        if (tokens.isEmpty) {
+          continue;
+        }
+
+        units.add(_MeaningUnit(
+          id: nextId++,
+          segmentIds: [segment.id],
+          startSec: segment.startSec,
+          endSec: segment.endSec,
+          text: text,
+          tokens: tokens,
+        ));
+        continue;
+      }
+
+      List<WordSegment> sentenceWords = [];
+      for (int i = 0; i < speechWords.length; i++) {
+        final word = speechWords[i];
+        sentenceWords.add(word);
+
+        final bool isBoundary = _isSentenceBoundary(word.word);
+        final bool isLast = i == speechWords.length - 1;
+
+        if (isBoundary || isLast) {
+          final sentenceText = sentenceWords.map((w) => w.word).join(' ').trim();
+          final tokens = _tokenize(sentenceText);
+          if (sentenceText.isNotEmpty && tokens.isNotEmpty) {
+            units.add(_MeaningUnit(
+              id: nextId++,
+              segmentIds: [segment.id],
+              startSec: sentenceWords.first.startSec,
+              endSec: sentenceWords.last.endSec,
+              text: sentenceText,
+              tokens: tokens,
+            ));
+          }
+          sentenceWords = [];
+        }
+      }
+    }
+
+    if (units.isEmpty) {
+      for (final segment in segments) {
+        final text = segment.text.trim();
+        if (text.isEmpty) {
+          continue;
+        }
+        final tokens = _tokenize(text);
+        if (tokens.isEmpty) {
+          continue;
+        }
+        units.add(_MeaningUnit(
+          id: nextId++,
+          segmentIds: [segment.id],
+          startSec: segment.startSec,
+          endSec: segment.endSec,
+          text: text,
+          tokens: tokens,
+        ));
+      }
+    }
+
+    return _mergeShortMeaningUnits(units);
+  }
+
+  List<_MeaningUnit> _mergeShortMeaningUnits(List<_MeaningUnit> units) {
+    if (units.length <= 1) {
+      return units;
+    }
+
+    final ordered = List<_MeaningUnit>.from(units)
+      ..sort((a, b) => a.startSec.compareTo(b.startSec));
+
+    final List<_MeaningUnit> result = [];
+    _MeaningUnit? buffer;
+
+    for (final unit in ordered) {
+      _checkCancellation();
+      if (buffer == null) {
+        buffer = unit;
+        continue;
+      }
+
+      final double gap = unit.startSec - buffer.endSec;
+      final bool shouldMerge = buffer.duration < _kMinUnitDuration ||
+          unit.duration < _kMinUnitDuration ||
+          gap <= _kMaxMergeGap;
+
+      if (shouldMerge) {
+        buffer = buffer.mergeWith(unit, buffer.id);
+      } else {
+        result.add(buffer);
+        buffer = unit;
+      }
+    }
+
+    if (buffer != null) {
+      result.add(buffer);
+    }
+
+    for (int i = 0; i < result.length; i++) {
+      result[i].id = i + 1;
+    }
+
+    return result;
+  }
+
+  bool _isSentenceBoundary(String word) {
+    if (word.isEmpty) return false;
+    final trimmed = word.trim();
+    if (trimmed.isEmpty) return false;
+    if (_kSentenceBoundaryPattern.hasMatch(trimmed)) return true;
+    return false;
+  }
+
+  List<String> _tokenize(String text) {
+    final normalized = text
+        .replaceAll(RegExp(r'[“”"\`´’‘•·△▽▶▷◀◁<>\[\]{}()/:;|]'), ' ')
+        .replaceAll(RegExp(r'[\-]+'), ' ')
+        .toLowerCase();
+
+    if (normalized.trim().isEmpty) {
+      return const [];
+    }
+
+    final List<String> tokens = [];
+    for (final raw in normalized.split(RegExp(r'\s+'))) {
+      if (raw.isEmpty) continue;
+      final cleaned = raw.replaceAll(_kWordCleanupPattern, '').trim();
+      if (cleaned.isEmpty) continue;
+      if (cleaned.length < 2) continue;
+      if (_kStopWords.contains(cleaned)) continue;
+      tokens.add(cleaned);
+    }
+    return tokens;
+  }
+
+  void _computeMeaningUnitStatistics(List<_MeaningUnit> units) {
+    if (units.isEmpty) return;
+
+    final Map<String, int> documentFrequency = <String, int>{};
+    for (final unit in units) {
+      _checkCancellation();
+      final uniqueTokens = unit.tokens.toSet();
+      for (final token in uniqueTokens) {
+        documentFrequency[token] = (documentFrequency[token] ?? 0) + 1;
+      }
+    }
+
+    final int documentCount = units.length;
+    double minTfidfScore = double.infinity;
+    double maxTfidfScore = -double.infinity;
+    double minCentrality = double.infinity;
+    double maxCentrality = -double.infinity;
+    double minDuration = double.infinity;
+    double maxDuration = -double.infinity;
+
+    for (final unit in units) {
+      final Map<String, int> termCounts = <String, int>{};
+      for (final token in unit.tokens) {
+        termCounts[token] = (termCounts[token] ?? 0) + 1;
+      }
+
+      final int tokenCount = unit.tokens.length;
+      final Map<String, double> vector = <String, double>{};
+      double tfidfSum = 0.0;
+
+      termCounts.forEach((token, count) {
+        final df = documentFrequency[token] ?? 1;
+        final tf = tokenCount == 0 ? 0.0 : count / tokenCount;
+        final idf = math.log((documentCount + 1) / (df + 1)) + 1;
+        final tfidf = tf * idf;
+        vector[token] = tfidf;
+        tfidfSum += tfidf;
+      });
+
+      unit.tfidfVector = vector;
+      unit.tfidfScore = tfidfSum;
+      minTfidfScore = math.min(minTfidfScore, tfidfSum);
+      maxTfidfScore = math.max(maxTfidfScore, tfidfSum);
+      minDuration = math.min(minDuration, unit.duration);
+      maxDuration = math.max(maxDuration, unit.duration);
+    }
+
+    for (int i = 0; i < units.length; i++) {
+      _checkCancellation();
+      final current = units[i];
+      double similaritySum = 0.0;
+      int similarityCount = 0;
+
+      for (int j = 0; j < units.length; j++) {
+        if (i == j) continue;
+        final similarity = _cosineSimilarity(current.tfidfVector, units[j].tfidfVector);
+        if (similarity > 0) {
+          similaritySum += similarity;
+          similarityCount++;
+        }
+      }
+
+      final centrality = similarityCount > 0 ? similaritySum / similarityCount : 0.0;
+      current.centrality = centrality;
+      minCentrality = math.min(minCentrality, centrality);
+      maxCentrality = math.max(maxCentrality, centrality);
+    }
+
+    for (final unit in units) {
+      final tfidfNorm = _normalize(unit.tfidfScore, minTfidfScore, maxTfidfScore);
+      final centralityNorm = _normalize(unit.centrality, minCentrality, maxCentrality);
+      final durationNorm = _normalize(unit.duration, minDuration, maxDuration);
+      unit.importance = (tfidfNorm * 0.55) + (centralityNorm * 0.30) + (durationNorm * 0.15);
+    }
+  }
+
+  double _cosineSimilarity(Map<String, double> a, Map<String, double> b) {
+    if (a.isEmpty || b.isEmpty) {
+      return 0.0;
+    }
+
+    double dot = 0.0;
+    double aNorm = 0.0;
+    double bNorm = 0.0;
+
+    final Map<String, double> shorter = a.length <= b.length ? a : b;
+    final Map<String, double> longer = identical(shorter, a) ? b : a;
+
+    shorter.forEach((token, value) {
+      final other = longer[token];
+      if (other != null) {
+        dot += value * other;
+      }
+    });
+
+    a.forEach((_, value) => aNorm += value * value);
+    b.forEach((_, value) => bNorm += value * value);
+
+    if (aNorm == 0.0 || bNorm == 0.0) {
+      return 0.0;
+    }
+
+    return dot / (math.sqrt(aNorm) * math.sqrt(bNorm));
+  }
+
+  _SummarySelectionResult _selectSummaryUnits(List<_MeaningUnit> units, List<WhisperSegment> segments) {
+    if (units.isEmpty) {
+      return const _SummarySelectionResult(selectedUnits: [], selectedSegmentIds: <int>{});
+    }
+
+    final double totalDuration = segments.isNotEmpty
+        ? math.max(0.0, segments.last.endSec - segments.first.startSec)
+        : units.fold(0.0, (sum, unit) => sum + unit.duration);
+
+    final double targetDuration = totalDuration * _kSummaryTargetRatio;
+    final double minDuration = totalDuration * _kSummaryMinRatio;
+    final double maxDuration = totalDuration * _kSummaryMaxRatio;
+    final int maxSegmentCount = (segments.length * _kSummaryMaxSegmentRatio).round().clamp(10, segments.length);
+
+    if (kDebugMode) {
+      print('📊 요약 선택 시작: 총 ${units.length}개 의미 단위, ${segments.length}개 세그먼트');
+      print('   목표 길이: ${targetDuration.toStringAsFixed(1)}s (${(_kSummaryTargetRatio * 100).toStringAsFixed(1)}%)');
+      print('   최대 세그먼트 수: $maxSegmentCount (${(_kSummaryMaxSegmentRatio * 100).toStringAsFixed(1)}%)');
+      print('   시간 윈도우 수: $_kSummaryTimeWindows');
+    }
+
+    final double startTime = units.first.startSec;
+    final double windowDuration = totalDuration / _kSummaryTimeWindows;
+
+    final List<List<_MeaningUnit>> windows = List.generate(_kSummaryTimeWindows, (_) => []);
+    for (final unit in units) {
+      final int windowIndex = ((unit.startSec - startTime) / windowDuration).floor().clamp(0, _kSummaryTimeWindows - 1);
+      windows[windowIndex].add(unit);
+    }
+
+    if (kDebugMode) {
+      for (int i = 0; i < windows.length; i++) {
+        print('   윈도우 $i: ${windows[i].length}개 단위 (${(startTime + i * windowDuration).toStringAsFixed(1)}s ~ ${(startTime + (i + 1) * windowDuration).toStringAsFixed(1)}s)');
+      }
+    }
+
+    final Set<int> selectedUnitIds = <int>{};
+    final List<_MeaningUnit> selection = [];
+    double accumulated = 0.0;
+
+    final int unitsPerWindow = (_kSummaryMaxUnitCount / _kSummaryTimeWindows).ceil();
+    final double targetDurationPerWindow = targetDuration / _kSummaryTimeWindows;
+
+    for (int windowIndex = 0; windowIndex < windows.length; windowIndex++) {
+      final windowUnits = windows[windowIndex];
+      if (windowUnits.isEmpty) continue;
+
+      final sortedWindow = List<_MeaningUnit>.from(windowUnits)
+        ..sort((a, b) => b.importance.compareTo(a.importance));
+
+      double windowAccumulated = 0.0;
+      int windowSelected = 0;
+
+      for (final unit in sortedWindow) {
+        if (selectedUnitIds.contains(unit.id)) continue;
+        if (windowSelected >= unitsPerWindow) break;
+        if (accumulated >= maxDuration) break;
+
+        final double projected = accumulated + unit.duration;
+        if (projected > maxDuration * 1.05) continue;
+
+        selectedUnitIds.add(unit.id);
+        selection.add(unit);
+        accumulated += unit.duration;
+        windowAccumulated += unit.duration;
+        windowSelected++;
+
+        if (windowAccumulated >= targetDurationPerWindow && windowSelected >= 1) {
+          break;
+        }
+      }
+
+      if (kDebugMode && windowSelected > 0) {
+        print('   윈도우 $windowIndex 선택: $windowSelected개 단위, ${windowAccumulated.toStringAsFixed(1)}s');
+      }
+    }
+
+    if (selection.isEmpty) {
+      final sortedByImportance = List<_MeaningUnit>.from(units)
+        ..sort((a, b) => b.importance.compareTo(a.importance));
+      final seed = sortedByImportance.first;
+      selectedUnitIds.add(seed.id);
+      selection.add(seed);
+      accumulated = seed.duration;
+    }
+
+    selection.sort((a, b) => a.startSec.compareTo(b.startSec));
+
+    if (kDebugMode) {
+      print('   시간 분산 선택 후: ${selection.length}개 단위, ${accumulated.toStringAsFixed(1)}s');
+    }
+
+    final Map<int, int> idToIndex = {
+      for (int i = 0; i < units.length; i++) units[i].id: i,
+    };
+
+    List<_MeaningUnit> finalSelection = _expandSelectionWithContext(
+      selection,
+      units,
+      idToIndex,
+      maxDuration * 0.4,
+      maxDuration,
+      _kSummaryMaxUnitCount,
+    );
+
+    if (kDebugMode) {
+      final afterExpandDuration = _calculateTotalDuration(finalSelection);
+      print('   문맥 확장 후: ${finalSelection.length}개 단위, ${afterExpandDuration.toStringAsFixed(1)}s');
+    }
+
+    finalSelection = _enforceSelectionDuration(finalSelection, units, minDuration, maxDuration);
+
+    if (kDebugMode) {
+      final afterEnforceDuration = _calculateTotalDuration(finalSelection);
+      print('   길이 보정 후: ${finalSelection.length}개 단위, ${afterEnforceDuration.toStringAsFixed(1)}s');
+    }
+
+    if (_kSummaryMaxUnitCount > 0 && finalSelection.length > _kSummaryMaxUnitCount) {
+      finalSelection = _limitSelectionByCount(finalSelection, _kSummaryMaxUnitCount);
+      if (kDebugMode) {
+        print('   단위 수 제한 후: ${finalSelection.length}개 단위');
+      }
+    }
+
+    final Set<int> segmentIds = <int>{};
+    for (final unit in finalSelection) {
+      segmentIds.addAll(unit.segmentIds);
+    }
+
+    if (segmentIds.length > maxSegmentCount) {
+      if (kDebugMode) {
+        print('   ⚠️ 세그먼트 수 초과: ${segmentIds.length}개 → $maxSegmentCount개로 제한');
+      }
+      final limitedSegmentIds = _limitSegmentsByTimeDiversity(
+        finalSelection,
+        segmentIds,
+        segments,
+        maxSegmentCount,
+        startTime,
+        totalDuration,
+      );
+      segmentIds.clear();
+      segmentIds.addAll(limitedSegmentIds);
+      
+      final filteredSelection = finalSelection.where((unit) {
+        return unit.segmentIds.any((sid) => segmentIds.contains(sid));
+      }).toList();
+      finalSelection = filteredSelection;
+    }
+
+    if (kDebugMode) {
+      final finalDuration = _calculateTotalDuration(finalSelection);
+      print('   최종 선택: ${finalSelection.length}개 단위, ${segmentIds.length}개 세그먼트, ${finalDuration.toStringAsFixed(1)}s');
+    }
+
+    return _SummarySelectionResult(
+      selectedUnits: finalSelection,
+      selectedSegmentIds: segmentIds,
+    );
+  }
+
+  List<_MeaningUnit> _expandSelectionWithContext(
+    List<_MeaningUnit> selection,
+    List<_MeaningUnit> allUnits,
+    Map<int, int> idToIndex,
+    double contextDurationLimit,
+    double hardMaxDuration,
+    int maxUnitCount,
+  ) {
+    if (selection.isEmpty) {
+      return selection;
+    }
+
+    final Set<int> selectedIds = selection.map((unit) => unit.id).toSet();
+    final List<_MeaningUnit> base = List<_MeaningUnit>.from(selection);
+    double currentDuration = _calculateTotalDuration(selection);
+
+    int contextAdditions = 0;
+    for (final unit in base) {
+      if (contextAdditions >= base.length * 2) break;
+      final index = idToIndex[unit.id];
+      if (index == null) continue;
+
+      if (index > 0) {
+        final prev = allUnits[index - 1];
+        final gap = unit.startSec - prev.endSec;
+        if (gap <= _kContextGapSeconds * 0.5 &&
+            prev.importance >= _kSummaryBridgeThreshold * 0.75 &&
+            !selectedIds.contains(prev.id)) {
+          final bool withinCount = maxUnitCount <= 0 || selectedIds.length < maxUnitCount;
+          final bool withinDuration = contextDurationLimit <= 0 ||
+              currentDuration + prev.duration <= contextDurationLimit;
+          final bool withinHardMax = hardMaxDuration <= 0 ||
+              currentDuration + prev.duration <= hardMaxDuration * 1.05;
+          if (withinCount && withinDuration && withinHardMax) {
+            selectedIds.add(prev.id);
+            currentDuration += prev.duration;
+            contextAdditions++;
+          }
+        }
+      }
+
+      if (index < allUnits.length - 1) {
+        final next = allUnits[index + 1];
+        final gap = next.startSec - unit.endSec;
+        if (gap <= _kContextGapSeconds * 0.5 &&
+            next.importance >= _kSummaryBridgeThreshold * 0.75 &&
+            !selectedIds.contains(next.id)) {
+          final bool withinCount = maxUnitCount <= 0 || selectedIds.length < maxUnitCount;
+          final bool withinDuration = contextDurationLimit <= 0 ||
+              currentDuration + next.duration <= contextDurationLimit;
+          final bool withinHardMax = hardMaxDuration <= 0 ||
+              currentDuration + next.duration <= hardMaxDuration * 1.05;
+          if (withinCount && withinDuration && withinHardMax) {
+            selectedIds.add(next.id);
+            currentDuration += next.duration;
+            contextAdditions++;
+          }
+        }
+      }
+    }
+
+    final ordered = allUnits
+        .where((unit) => selectedIds.contains(unit.id))
+        .toList()
+      ..sort((a, b) => a.startSec.compareTo(b.startSec));
+
+    int bridgeAdditions = 0;
+    for (int i = 0; i < ordered.length - 1; i++) {
+      if (bridgeAdditions >= 5) break;
+      final current = ordered[i];
+      final next = ordered[i + 1];
+      final gap = next.startSec - current.endSec;
+      if (gap > _kSummaryMaxGapSeconds * 1.5) {
+        final currentIndex = idToIndex[current.id] ?? -1;
+        final nextIndex = idToIndex[next.id] ?? -1;
+        if (currentIndex >= 0 && nextIndex >= 0 && nextIndex - currentIndex > 1) {
+          int additions = 0;
+          for (int j = currentIndex + 1; j < nextIndex; j++) {
+            final candidate = allUnits[j];
+            if (candidate.importance < _kSummaryBridgeThreshold * 1.2 ||
+                selectedIds.contains(candidate.id)) {
+              continue;
+            }
+            if (maxUnitCount > 0 && selectedIds.length >= maxUnitCount) {
+              break;
+            }
+            if (hardMaxDuration > 0 &&
+                currentDuration + candidate.duration > hardMaxDuration * 1.05) {
+              continue;
+            }
+            selectedIds.add(candidate.id);
+            currentDuration += candidate.duration;
+            additions++;
+            bridgeAdditions++;
+            if (additions >= _kSummaryContextNeighborLimit || bridgeAdditions >= 5) {
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    final result = allUnits
+        .where((unit) => selectedIds.contains(unit.id))
+        .toList()
+      ..sort((a, b) => a.startSec.compareTo(b.startSec));
+    return result;
+  }
+
+  List<_MeaningUnit> _enforceSelectionDuration(
+    List<_MeaningUnit> selection,
+    List<_MeaningUnit> allUnits,
+    double minDuration,
+    double maxDuration,
+  ) {
+    if (selection.isEmpty) {
+      return selection;
+    }
+
+    final Set<int> selectedIds = selection.map((unit) => unit.id).toSet();
+    double total = _calculateTotalDuration(selection);
+
+    if (maxDuration > 0 && total > maxDuration) {
+      final removable = selection.toList()
+        ..sort((a, b) => a.importance.compareTo(b.importance));
+      for (final unit in removable) {
+        if (selection.length <= _kSummaryMinUnitCount) {
+          break;
+        }
+        final double newTotal = total - unit.duration;
+        if (newTotal >= minDuration) {
+          selection = selection.where((item) => item.id != unit.id).toList();
+          selectedIds.remove(unit.id);
+          total = newTotal;
+        }
+        if (total <= maxDuration) {
+          break;
+        }
+      }
+    }
+
+    if (maxDuration > 0 && total > maxDuration) {
+      final removable = selection.toList()
+        ..sort((a, b) => a.importance.compareTo(b.importance));
+      for (final unit in removable) {
+        if (selection.length <= 1) {
+          break;
+        }
+        selection = selection.where((item) => item.id != unit.id).toList();
+        selectedIds.remove(unit.id);
+        total -= unit.duration;
+        if (total <= maxDuration) {
+          break;
+        }
+      }
+    }
+
+    if (total < minDuration && selection.length < allUnits.length) {
+      final double deficit = minDuration - total;
+      final candidates = allUnits
+          .where((unit) => !selectedIds.contains(unit.id))
+          .toList()
+        ..sort((a, b) => b.importance.compareTo(a.importance));
+
+      int addedCount = 0;
+      for (final unit in candidates) {
+        if (addedCount >= 10) break;
+        final double projected = total + unit.duration;
+        if (maxDuration > 0 && projected > maxDuration * 1.05) {
+          continue;
+        }
+        selection.add(unit);
+        selectedIds.add(unit.id);
+        total = projected;
+        addedCount++;
+        if (total >= minDuration) {
+          break;
+        }
+      }
+    }
+
+    if (_kSummaryMaxUnitCount > 0 && selection.length > _kSummaryMaxUnitCount) {
+      selection = _limitSelectionByCount(selection, _kSummaryMaxUnitCount);
+      total = _calculateTotalDuration(selection);
+      selectedIds
+        ..clear()
+        ..addAll(selection.map((unit) => unit.id));
+    }
+
+    if (total < minDuration && selection.length < allUnits.length) {
+      final extra = allUnits
+          .where((unit) => !selection.any((chosen) => chosen.id == unit.id))
+          .toList()
+        ..sort((a, b) => b.importance.compareTo(a.importance));
+      int addedCount = 0;
+      for (final unit in extra) {
+        if (addedCount >= 5) break;
+        final double projected = total + unit.duration;
+        if (maxDuration > 0 && projected > maxDuration * 1.05) {
+          continue;
+        }
+        selection.add(unit);
+        selectedIds.add(unit.id);
+        total = projected;
+        addedCount++;
+        if (total >= minDuration || (_kSummaryMaxUnitCount > 0 && selection.length >= _kSummaryMaxUnitCount)) {
+          break;
+        }
+      }
+    }
+
+    selection.sort((a, b) => a.startSec.compareTo(b.startSec));
+    return selection;
+  }
+
+  List<_MeaningUnit> _limitSelectionByCount(List<_MeaningUnit> selection, int maxCount) {
+    if (selection.length <= maxCount) {
+      return selection;
+    }
+
+    final List<_MeaningUnit> ordered = selection.toList()
+      ..sort((a, b) => b.importance.compareTo(a.importance));
+    final limited = ordered.take(maxCount).toList()
+      ..sort((a, b) => a.startSec.compareTo(b.startSec));
+    return limited;
+  }
+
+  double _calculateTotalDuration(List<_MeaningUnit> units) {
+    return units.fold(0.0, (sum, unit) => sum + unit.duration);
+  }
+
+  Set<int> _limitSegmentsByImportance(
+    List<_MeaningUnit> selectedUnits,
+    Set<int> segmentIds,
+    int maxCount,
+  ) {
+    if (segmentIds.length <= maxCount) {
+      return segmentIds;
+    }
+
+    final Map<int, double> segmentImportance = <int, double>{};
+    for (final unit in selectedUnits) {
+      for (final segmentId in unit.segmentIds) {
+        segmentImportance[segmentId] = (segmentImportance[segmentId] ?? 0.0) + unit.importance;
+      }
+    }
+
+    final sortedSegments = segmentIds.toList()
+      ..sort((a, b) {
+        final importanceA = segmentImportance[a] ?? 0.0;
+        final importanceB = segmentImportance[b] ?? 0.0;
+        return importanceB.compareTo(importanceA);
+      });
+
+    return sortedSegments.take(maxCount).toSet();
+  }
+
+  Set<int> _limitSegmentsByTimeDiversity(
+    List<_MeaningUnit> selectedUnits,
+    Set<int> segmentIds,
+    List<WhisperSegment> segments,
+    int maxCount,
+    double startTime,
+    double totalDuration,
+  ) {
+    if (segmentIds.length <= maxCount) {
+      return segmentIds;
+    }
+
+    final Map<int, double> segmentImportance = <int, double>{};
+    final Map<int, double> segmentTime = <int, double>{};
+    
+    for (final unit in selectedUnits) {
+      for (final segmentId in unit.segmentIds) {
+        segmentImportance[segmentId] = (segmentImportance[segmentId] ?? 0.0) + unit.importance;
+      }
+    }
+
+    for (final segment in segments) {
+      if (segmentIds.contains(segment.id)) {
+        segmentTime[segment.id] = segment.startSec;
+      }
+    }
+
+    final int windowCount = math.min(_kSummaryTimeWindows, maxCount ~/ 2);
+    final double windowDuration = totalDuration / windowCount;
+    final List<List<int>> windows = List.generate(windowCount, (_) => []);
+
+    for (final segmentId in segmentIds) {
+      final time = segmentTime[segmentId] ?? startTime;
+      final int windowIndex = ((time - startTime) / windowDuration).floor().clamp(0, windowCount - 1);
+      windows[windowIndex].add(segmentId);
+    }
+
+    final Set<int> result = <int>{};
+    final int segmentsPerWindow = (maxCount / windowCount).ceil();
+
+    for (int i = 0; i < windows.length; i++) {
+      final windowSegments = windows[i];
+      if (windowSegments.isEmpty) continue;
+
+      windowSegments.sort((a, b) {
+        final importanceA = segmentImportance[a] ?? 0.0;
+        final importanceB = segmentImportance[b] ?? 0.0;
+        return importanceB.compareTo(importanceA);
+      });
+
+      final int takeCount = math.min(segmentsPerWindow, windowSegments.length);
+      result.addAll(windowSegments.take(takeCount));
+    }
+
+    if (result.length < maxCount) {
+      final remaining = segmentIds.where((id) => !result.contains(id)).toList()
+        ..sort((a, b) {
+          final importanceA = segmentImportance[a] ?? 0.0;
+          final importanceB = segmentImportance[b] ?? 0.0;
+          return importanceB.compareTo(importanceA);
+        });
+      result.addAll(remaining.take(maxCount - result.length));
+    }
+
+    return result;
+  }
+
+  List<ThemeGroup> _buildChaptersFromUnits(List<_MeaningUnit> units, List<WhisperSegment> segments) {
+    if (units.isEmpty) {
+      return const [];
+    }
+
+    final chapters = _segmentUnitsIntoChapters(units);
+    if (chapters.isEmpty) {
+      return const [];
+    }
+
+    final List<ThemeGroup> result = [];
+    for (int index = 0; index < chapters.length; index++) {
+      final chapter = chapters[index];
+      if (chapter.units.isEmpty) continue;
+
+      final Set<int> segmentIds = <int>{};
+      for (final unit in chapter.units) {
+        segmentIds.addAll(unit.segmentIds);
+      }
+
+      final chapterSegments = segments
+          .where((segment) => segmentIds.contains(segment.id))
+          .toList()
+        ..sort((a, b) => a.startSec.compareTo(b.startSec));
+
+      if (chapterSegments.isEmpty) continue;
+
+      final keywords = _extractTopKeywords(chapter);
+      final title = _buildChapterTitle(keywords, index + 1);
+      final summary = _buildChapterSummary(chapter);
+
+      result.add(ThemeGroup(
+        theme: title,
+        segments: chapterSegments,
+        summary: summary.isEmpty ? null : summary,
+        keywords: keywords,
+      ));
+    }
+
+    return result;
+  }
+
+  List<_ChapterCandidate> _segmentUnitsIntoChapters(List<_MeaningUnit> units) {
+    if (units.isEmpty) {
+      return const [];
+    }
+
+    final double totalDuration = units.last.endSec - units.first.startSec;
+    final int desiredCount = math.max(1, math.min(_kDesiredChapterCount, units.length));
+    final double targetChapterDuration = totalDuration > 0
+        ? totalDuration / desiredCount
+        : 60.0;
+    final double minChapterDuration = targetChapterDuration.clamp(30.0, 150.0);
+
+    final List<_ChapterCandidate> chapters = [];
+    _ChapterCandidate current = _ChapterCandidate(chapters.length + 1);
+    current.addUnit(units.first);
+    chapters.add(current);
+
+    for (int i = 1; i < units.length; i++) {
+      _checkCancellation();
+      final unit = units[i];
+      final double gap = unit.startSec - current.units.last.endSec;
+      final double similarity = _cosineSimilarity(unit.tfidfVector, current.centroid);
+      final bool reachedTarget = current.duration >= targetChapterDuration && chapters.length < desiredCount;
+      final bool shouldSplit =
+          reachedTarget ||
+          (current.duration >= minChapterDuration && similarity < _kChapterSimilarityThreshold) ||
+          gap > _kChapterGapSeconds;
+
+      if (shouldSplit) {
+        current = _ChapterCandidate(chapters.length + 1);
+        current.addUnit(unit);
+        chapters.add(current);
+      } else {
+        current.addUnit(unit);
+      }
+    }
+
+    if (chapters.length <= 1 && desiredCount > 1) {
+      return _splitChaptersEvenly(units, desiredCount);
+    }
+
+    return chapters;
+  }
+
+  List<_ChapterCandidate> _splitChaptersEvenly(List<_MeaningUnit> units, int desiredCount) {
+    if (units.isEmpty) {
+      return const [];
+    }
+
+    final double totalDuration = units.last.endSec - units.first.startSec;
+    if (totalDuration <= 0) {
+      final _ChapterCandidate single = _ChapterCandidate(1);
+      for (final unit in units) {
+        single.addUnit(unit);
+      }
+      return [single];
+    }
+
+    final double sliceDuration = totalDuration / desiredCount;
+    final List<_ChapterCandidate> chapters = [];
+    _ChapterCandidate current = _ChapterCandidate(1);
+    current.addUnit(units.first);
+    chapters.add(current);
+
+    for (int i = 1; i < units.length; i++) {
+      final unit = units[i];
+      final bool shouldSplit =
+          (current.duration >= sliceDuration && chapters.length < desiredCount) ||
+          (current.units.length >= 8 && chapters.length < desiredCount);
+
+      if (shouldSplit) {
+        current = _ChapterCandidate(chapters.length + 1);
+        chapters.add(current);
+      }
+      current.addUnit(unit);
+    }
+
+    return chapters;
+  }
+
+  List<String> _extractTopKeywords(_ChapterCandidate chapter, {int maxKeywords = 4}) {
+    final Map<String, double> scores = <String, double>{};
+    for (final unit in chapter.units) {
+      unit.tfidfVector.forEach((token, weight) {
+        scores[token] = (scores[token] ?? 0.0) + weight;
+      });
+    }
+
+    final entries = scores.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    final List<String> keywords = [];
+    for (final entry in entries) {
+      final token = entry.key;
+      if (token.length < 2) continue;
+      if (_kStopWords.contains(token)) continue;
+      keywords.add(token);
+      if (keywords.length >= maxKeywords) break;
+    }
+
+    return keywords;
+  }
+
+  String _buildChapterTitle(List<String> keywords, int chapterIndex) {
+    if (keywords.isEmpty) {
+      return '챕터 $chapterIndex';
+    }
+    final title = keywords.take(3).map(_formatKeywordTitle).join(' · ');
+    return title.isEmpty ? '챕터 $chapterIndex' : title;
+  }
+
+  String _formatKeywordTitle(String keyword) {
+    if (keyword.isEmpty) return keyword;
+    if (RegExp(r'^[a-z]').hasMatch(keyword)) {
+      return keyword[0].toUpperCase() + keyword.substring(1);
+    }
+    return keyword;
+  }
+
+  String _buildChapterSummary(_ChapterCandidate chapter) {
+    final sentences = chapter.units
+        .map((unit) => unit.text.trim())
+        .where((text) => text.isNotEmpty)
+        .take(2)
+        .toList();
+
+    if (sentences.isEmpty) {
+      return '';
+    }
+
+    final buffer = StringBuffer();
+    for (final sentence in sentences) {
+      if (buffer.isNotEmpty) {
+        buffer.write(' ');
+      }
+      buffer.write(sentence);
+    }
+
+    var summary = buffer.toString().trim();
+    if (summary.length > 160) {
+      summary = summary.substring(0, 160).trimRight() + '…';
+    }
+    return summary;
+  }
+
+  String _composeSummaryText(List<_MeaningUnit> units) {
+    if (units.isEmpty) {
+      return '';
+    }
+
+    final buffer = StringBuffer();
+    for (final unit in units) {
+      final text = unit.text.trim();
+      if (text.isEmpty) continue;
+      if (buffer.isNotEmpty) {
+        buffer.write('\n');
+      }
+      buffer.write(text);
+    }
+    return buffer.toString().trim();
+  }
+
+  String _buildChapterSummaryFromSegments(List<WhisperSegment> segments) {
+    if (segments.isEmpty) {
+      return '';
+    }
+
+    final sentences = segments
+        .map((s) => s.text.trim())
+        .where((text) => text.isNotEmpty)
+        .take(3)
+        .toList();
+
+    if (sentences.isEmpty) {
+      return '';
+    }
+
+    final buffer = StringBuffer();
+    for (final sentence in sentences) {
+      if (buffer.isNotEmpty) {
+        buffer.write(' ');
+      }
+      buffer.write(sentence);
+    }
+
+    var summary = buffer.toString().trim();
+    if (summary.length > 200) {
+      summary = summary.substring(0, 200).trimRight() + '…';
+    }
+    return summary;
+  }
+
+  List<String> _extractTopKeywordsFromSegments(List<WhisperSegment> segments, {int maxKeywords = 4}) {
+    if (segments.isEmpty) {
+      return [];
+    }
+
+    final Map<String, int> wordCounts = <String, int>{};
+    for (final segment in segments) {
+      final tokens = _tokenize(segment.text);
+      for (final token in tokens) {
+        wordCounts[token] = (wordCounts[token] ?? 0) + 1;
+      }
+    }
+
+    final entries = wordCounts.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    final List<String> keywords = [];
+    for (final entry in entries) {
+      final token = entry.key;
+      if (token.length < 2) continue;
+      if (_kStopWords.contains(token)) continue;
+      keywords.add(token);
+      if (keywords.length >= maxKeywords) break;
+    }
+
+    return keywords;
+  }
+
+  String _composeSummaryTextFromChapters(List<ThemeGroup> chapters) {
+    if (chapters.isEmpty) {
+      return '';
+    }
+
+    final buffer = StringBuffer();
+    for (int i = 0; i < chapters.length; i++) {
+      final chapter = chapters[i];
+      if (buffer.isNotEmpty) {
+        buffer.write('\n\n');
+      }
+      buffer.write('${i + 1}. ${chapter.theme}');
+      if (chapter.summary != null && chapter.summary!.isNotEmpty) {
+        buffer.write('\n   ${chapter.summary}');
+      }
+    }
+    return buffer.toString().trim();
+  }
+
+  double _normalize(double value, double min, double max) {
+    if (max - min <= 1e-9) {
+      return 0.0;
+    }
+    return (value - min) / (max - min);
+  }
 
   /// whisper.cpp 호출 함수 (public)
   Future<List<WhisperSegment>> callLocalWhisper(String audioPath, List<SilenceSegment> silences, List<AudioEnergyFrame> energyProfile) async {
@@ -700,7 +2029,7 @@ class AIService {
       final projectRoot = _resolveProjectRoot();
       String whisperCliPath;
       String modelPath;
-
+      
       if (Platform.isMacOS) {
         final projectDir = Directory.current.path;
         print('현재 디렉토리: $projectDir');
@@ -1160,300 +2489,6 @@ class AIService {
 
 
 
-  // 청크 단위 처리를 위한 메서드들
-  List<List<WhisperSegment>> _createChunks(List<WhisperSegment> segments) {
-    const int maxSegmentsPerChunk = 300; // 각 청크당 최대 세그먼트 수
-    const int overlapSize = 30; // 오버랩 크기 (10% 정도)
-    
-    List<List<WhisperSegment>> chunks = [];
-    int startIndex = 0;
-    
-    while (startIndex < segments.length) {
-      int endIndex = (startIndex + maxSegmentsPerChunk).clamp(0, segments.length);
-      
-      // 마지막 청크가 아닌 경우 오버랩 적용
-      if (endIndex < segments.length) {
-        endIndex = (endIndex + overlapSize).clamp(0, segments.length);
-      }
-      
-      chunks.add(segments.sublist(startIndex, endIndex));
-      
-      // 다음 청크 시작점 (오버랩 고려)
-      if (endIndex < segments.length) {
-        startIndex = endIndex - overlapSize;
-      } else {
-        break;
-      }
-    }
-    
-    return chunks;
-  }
-
-  Future<Map<String, dynamic>> _getChunkOverview(List<WhisperSegment> chunkSegments, int chunkIndex, int totalChunks, String apiKey, Uri uri) async {
-    // 취소 상태 직접 확인
-    if (_isCancelled || appState.isOperationCancelled) {
-      if (kDebugMode) print('✅ AIService: _getChunkOverview에서 작업 취소됨');
-      throw CancellationException('작업이 취소되었습니다.');
-    }
-    
-    final formatted = chunkSegments.map((s) => {
-      'id': s.id,
-      'start': s.startSec,
-      'end': s.endSec,
-      'text': s.text,
-    }).toList();
-
-    final overviewPrompt = '''
-다음은 영상의 ${chunkIndex}번째 청크 (전체 ${totalChunks}개 중)입니다.
-이 청크의 주요 내용과 구조를 분석해주세요.
-
-**청크 정보:**
-- 청크 번호: ${chunkIndex}/${totalChunks}
-- 세그먼트 수: ${chunkSegments.length}개
-- 시간 범위: ${_formatTimeToHMS(chunkSegments.first.startSec)} ~ ${_formatTimeToHMS(chunkSegments.last.endSec)}
-
-**분석 요청사항:**
-1. 이 청크의 주요 주제와 핵심 내용
-2. 청크 내 논리적 구조 (시작, 전개, 마무리)
-3. 다른 청크와의 연결성 (이전/다음 청크와의 관계)
-4. 중요한 키워드나 개념
-
-**반드시 JSON 형식으로 반환:**
-{
-  "chunk_index": ${chunkIndex},
-  "main_topic": "이 청크의 주요 주제",
-  "key_points": ["핵심 포인트1", "핵심 포인트2", "핵심 포인트3"],
-  "structure": {
-    "start": "시작 부분의 특징",
-    "development": "전개 부분의 특징", 
-    "end": "마무리 부분의 특징"
-  },
-  "connection": {
-    "previous": "이전 청크와의 연결점",
-    "next": "다음 청크와의 연결점"
-  },
-  "important_segments": [1, 5, 12, 23]
-}
-
-청크 세그먼트:
-${jsonEncode(formatted)}
-''';
-
-    // chatProxy 호출로 변경
-    final chatProxyUrl = 'https://chatproxy-v4kacndtqq-uc.a.run.app';
-    final idToken = await _authService.getIdToken();
-    
-    if (idToken == null) {
-      throw StateError('인증 토큰을 가져올 수 없습니다. 로그인 상태를 확인해주세요.');
-    }
-    
-    final body = jsonEncode({
-      'messages': [
-        {'role': 'system', 'content': 'You are an expert at analyzing video content structure and identifying key segments.'},
-        {'role': 'user', 'content': overviewPrompt},
-      ],
-    });
-
-    final response = await _getHttpClient().post(
-      Uri.parse(chatProxyUrl),
-      headers: {
-        'Authorization': 'Bearer $idToken',
-        'Content-Type': 'application/json',
-      },
-      body: body,
-    );
-
-    if (response.statusCode != 200) {
-      throw StateError('청크 개요 파악 실패: ${response.statusCode}');
-    }
-
-    final responseData = jsonDecode(response.body);
-    final content = responseData['content'] as String;
-    
-    try {
-      // ```json 코드 블록 제거
-      final cleanContent = _removeJsonCodeBlock(content);
-      return jsonDecode(cleanContent) as Map<String, dynamic>;
-    } catch (e) {
-      print('청크 개요 JSON 파싱 실패: $e');
-      return {
-        'chunk_index': chunkIndex,
-        'main_topic': '청크 ${chunkIndex}',
-        'key_points': ['내용 분석 실패'],
-        'structure': {'start': '', 'development': '', 'end': ''},
-        'connection': {'previous': '', 'next': ''},
-        'important_segments': [],
-      };
-    }
-  }
-
-  Future<String> _integrateChunkOverviews(List<Map<String, dynamic>> chunkOverviews, String apiKey, Uri uri) async {
-    // 취소 상태 직접 확인
-    if (_isCancelled || appState.isOperationCancelled) {
-      if (kDebugMode) print('✅ AIService: _integrateChunkOverviews에서 작업 취소됨');
-      throw CancellationException('작업이 취소되었습니다.');
-    }
-    
-    final integrationPrompt = '''
-다음은 영상의 각 청크별 분석 결과입니다. 
-이를 바탕으로 전체 영상의 구조와 주제를 통합 분석해주세요.
-
-**청크 분석 결과:**
-${chunkOverviews.map((overview) => '''
-청크 ${overview['chunk_index']}:
-- 주제: ${overview['main_topic']}
-- 핵심 포인트: ${(overview['key_points'] as List).join(', ')}
-- 연결점: 이전(${overview['connection']['previous']}) / 다음(${overview['connection']['next']})
-''').join('\n')}
-
-**통합 분석 요청사항:**
-1. 전체 영상의 주요 주제와 목적
-2. 전체 구조 (도입부, 전개부, 결론부)
-3. 주제별 그룹화 (5개 그룹으로 나누기)
-4. 각 주제 그룹의 핵심 내용과 세그먼트 범위
-
-**반드시 JSON 형식으로 반환:**
-{
-  "main_topic": "전체 영상의 주요 주제",
-  "purpose": "영상의 목적",
-  "overall_structure": {
-    "introduction": "도입부 특징",
-    "development": "전개부 특징",
-    "conclusion": "결론부 특징"
-  },
-  "structure": [
-    {
-      "theme": "주제1",
-      "description": "이 주제의 핵심 내용",
-      "start_segment_id": 1,
-      "end_segment_id": 50
-    }
-  ]
-}
-''';
-
-    // chatProxy 호출로 변경
-    final chatProxyUrl = 'https://chatproxy-v4kacndtqq-uc.a.run.app';
-    final idToken = await _authService.getIdToken();
-    
-    if (idToken == null) {
-      throw StateError('인증 토큰을 가져올 수 없습니다. 로그인 상태를 확인해주세요.');
-    }
-    
-    final body = jsonEncode({
-      'messages': [
-        {'role': 'system', 'content': 'You are an expert at integrating and synthesizing information from multiple sources.'},
-        {'role': 'user', 'content': integrationPrompt},
-      ],
-    });
-
-    final response = await _getHttpClient().post(
-      Uri.parse(chatProxyUrl),
-      headers: {
-        'Authorization': 'Bearer $idToken',
-        'Content-Type': 'application/json',
-      },
-      body: body,
-    );
-
-    if (response.statusCode != 200) {
-      throw StateError('청크 통합 실패: ${response.statusCode}');
-    }
-
-    final responseData = jsonDecode(response.body);
-    final content = responseData['content'] as String;
-    
-    try {
-      // ```json 코드 블록 제거
-      final cleanContent = _removeJsonCodeBlock(content);
-      final result = jsonDecode(cleanContent) as Map<String, dynamic>;
-      return jsonEncode(result);
-    } catch (e) {
-      print('통합 분석 JSON 파싱 실패: $e');
-      return content; // 원본 텍스트 반환
-    }
-  }
-
-  Future<List<ThemeGroup>> _groupSegmentsByTheme(List<WhisperSegment> segments, String overallStructure) async {
-    // 취소 상태 직접 확인
-    if (_isCancelled || appState.isOperationCancelled) {
-      if (kDebugMode) print('✅ AIService: _groupSegmentsByTheme에서 작업 취소됨');
-      throw CancellationException('작업이 취소되었습니다.');
-    }
-    
-    if (segments.isEmpty) {
-      print('세그먼트가 비어있어 그룹화를 건너뜁니다.');
-      return [];
-    }
-    
-    try {
-      // JSON 파싱 시도
-      final overview = jsonDecode(overallStructure) as Map<String, dynamic>;
-      final structure = overview['structure'] as List<dynamic>;
-      List<ThemeGroup> groups = [];
-
-      // 구조 정보로 그룹 생성 (ID 대신 인덱스 사용)
-      for (final group in structure) {
-        final startIndex = (group['start_segment_id'] as int) - 1; // 1-based를 0-based로 변환
-        final endIndex = (group['end_segment_id'] as int); // 1-based
-        final theme = group['theme'] as String;
-
-        // 인덱스 범위 확인 및 조정
-        final safeStartIndex = startIndex.clamp(0, segments.length - 1);
-        final safeEndIndex = endIndex.clamp(0, segments.length);
-        
-        if (safeStartIndex < safeEndIndex && safeStartIndex < segments.length) {
-          final groupSegments = segments.sublist(safeStartIndex, safeEndIndex);
-          
-          groups.add(ThemeGroup(
-            theme: theme,
-            segments: groupSegments,
-          ));
-          
-          print('그룹 생성: $theme (${groupSegments.length}개 세그먼트) - 인덱스 ${safeStartIndex}~${safeEndIndex-1}');
-        } else {
-          print('⚠️ 그룹 생성 실패: $theme - 인덱스 범위 오류 (${safeStartIndex}~${safeEndIndex-1})');
-        }
-      }
-
-      return groups;
-    } catch (e) {
-      print('주제별 그룹화 실패: $e');
-      // 실패 시 기본 그룹화 (5개 그룹으로 균등 분할)
-      return _createDefaultGroups(segments);
-    }
-  }
-
-  // 기본 그룹화 (실패 시 사용)
-  List<ThemeGroup> _createDefaultGroups(List<WhisperSegment> segments) {
-    List<ThemeGroup> groups = [];
-    final groupSize = (segments.length / 5).ceil();
-    
-    for (int i = 0; i < 5; i++) {
-      final startIndex = i * groupSize;
-      final endIndex = ((i + 1) * groupSize).clamp(0, segments.length);
-      
-      if (startIndex < segments.length) {
-        final groupSegments = segments.sublist(startIndex, endIndex);
-        groups.add(ThemeGroup(
-          theme: '주제 ${i + 1}',
-          segments: groupSegments,
-        ));
-      }
-    }
-    
-    return groups;
-  }
-
-  // 시간을 HH:MM:SS 형식으로 포맷
-  String _formatTimeToHMS(double seconds) {
-    final hours = (seconds / 3600).floor();
-    final minutes = ((seconds % 3600) / 60).floor();
-    final secs = (seconds % 60).floor();
-    
-    return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
-  }
-
   Future<List<int>> _summarizeThemeGroup(ThemeGroup group, String apiKey, Uri uri) async {
     try {
       // 주제별 핵심 세그먼트 선택 (시간 기반)
@@ -1826,7 +2861,7 @@ ${chunkOverviews.map((overview) => '''
         endSec: segmentEnd,
       ));
     }
-
+    
     return result;
   }
 
@@ -2383,16 +3418,16 @@ ${jsonEncode(formatted)}
     
     // Resources 폴더 내용 확인 (디버깅용)
     if (kDebugMode) {
-      try {
-        final dir = Directory(appResourcesPath);
-        if (dir.existsSync()) {
-          final files = dir.listSync();
-          print('📁 Resources 폴더 파일들:');
-          for (final file in files) {
-            print('   - ${file.path.split('/').last}');
-          }
+    try {
+      final dir = Directory(appResourcesPath);
+      if (dir.existsSync()) {
+        final files = dir.listSync();
+        print('📁 Resources 폴더 파일들:');
+        for (final file in files) {
+          print('   - ${file.path.split('/').last}');
         }
-      } catch (e) {
+      }
+    } catch (e) {
         print('❌ Resources 폴더 접근 오류: $e');
       }
     }
@@ -2807,7 +3842,7 @@ ${jsonEncode(formatted)}
     }
     return result;
   }
-
+  
   // SRT 시간을 초 단위로 변환
   double _srtTimeToSeconds(String srtTime) {
     final parts = srtTime.split(':');

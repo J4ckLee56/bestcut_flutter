@@ -20,7 +20,7 @@ class XMLService {
       final rawSegments = isSummary 
           ? _appState.segments.where((s) => selectedSegmentIds.contains(s.id)).toList()
           : List<WhisperSegment>.from(_appState.segments);
-
+      
       final preparedSegments = _prepareSegmentsForExport(rawSegments, isSummary: isSummary);
       
       final xml = _buildPremiereXML(preparedSegments, isSummary);
@@ -44,7 +44,7 @@ class XMLService {
       final rawSegments = isSummary 
           ? _appState.segments.where((s) => selectedSegmentIds.contains(s.id)).toList()
           : List<WhisperSegment>.from(_appState.segments);
-
+      
       final preparedSegments = _prepareSegmentsForExport(rawSegments, isSummary: isSummary);
       
       final xml = _buildFCPXML(preparedSegments, isSummary);
@@ -68,9 +68,9 @@ class XMLService {
       final rawSegments = isSummary 
           ? _appState.segments.where((s) => selectedSegmentIds.contains(s.id)).toList()
           : List<WhisperSegment>.from(_appState.segments);
-
+      
       final preparedSegments = _prepareSegmentsForExport(rawSegments, isSummary: isSummary);
-
+      
       if (kDebugMode) print('🔍 DaVinci XML: isSummary=$isSummary, selectedSegmentIds=$selectedSegmentIds, filteredSegments=${preparedSegments.length}');
       
       final xml = _buildDaVinciXML(preparedSegments, isSummary);

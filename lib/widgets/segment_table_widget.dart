@@ -465,15 +465,15 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
       child: GestureDetector(
         onTap: () => _focusNode.requestFocus(), // 클릭 시 포커스 요청
         child: Container(
-          decoration: CursorTheme.containerDecoration(
-            backgroundColor: CursorTheme.backgroundTertiary,
-            borderColor: CursorTheme.borderSecondary,
-            borderRadius: CursorTheme.radiusSmall,
-          ),
-          child: Column(
-            children: [
-              // 모드 표시 헤더
-              Container(
+      decoration: CursorTheme.containerDecoration(
+        backgroundColor: CursorTheme.backgroundTertiary,
+        borderColor: CursorTheme.borderSecondary,
+        borderRadius: CursorTheme.radiusSmall,
+      ),
+      child: Column(
+        children: [
+          // 모드 표시 헤더
+          Container(
             width: double.infinity,
             padding: const EdgeInsets.all(CursorTheme.spacingS),
             decoration: BoxDecoration(
@@ -585,8 +585,8 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
                         fontWeight: FontWeight.w500,
                         fontSize: 10,
                       ),
-                    ),
                   ),
+                ),
               ],
             ),
           ),
@@ -668,12 +668,12 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
                 ],
               ),
             ),
-          ],
+        ],
         ),
       ),
-    ),
-  );
-}
+      ),
+    );
+  }
 
   // 개선된 세그먼트 아이템 빌더
   Widget _buildSegmentItem(BuildContext context, int index, bool isSelected, bool isUnifiedSummary) {
@@ -707,7 +707,7 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
           }
         },
         child: GestureDetector(
-          key: widget.appState.segmentKeys[index],
+      key: widget.appState.segmentKeys[index],
           behavior: HitTestBehavior.opaque,
           onTap: () {
             // 드래그 중이었으면 탭 무시
@@ -740,39 +740,39 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
               });
             }
           },
-          onSecondaryTap: () => _toggleSummarySegment(index),
-          onDoubleTap: () => _startEditing(index),
-        child: Container(
-          margin: const EdgeInsets.only(bottom: CursorTheme.spacingXS),
-          decoration: BoxDecoration(
+      onSecondaryTap: () => _toggleSummarySegment(index),
+      onDoubleTap: () => _startEditing(index),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: CursorTheme.spacingXS),
+        decoration: BoxDecoration(
             color: isMultiSelected
                 ? CursorTheme.cursorBlueLight.withOpacity(0.2)
                 : isPlaying
-                    ? CursorTheme.cursorBlue.withOpacity(0.2)
-                    : isSelected 
-                        ? CursorTheme.cursorBlue.withOpacity(0.1)
-                        : isUnifiedSummary
-                            ? CursorTheme.warning.withOpacity(0.05)
-                            : CursorTheme.backgroundSecondary,
-            borderRadius: BorderRadius.circular(CursorTheme.radiusSmall),
-            border: Border.all(
+              ? CursorTheme.cursorBlue.withOpacity(0.2)
+              : isSelected 
+                  ? CursorTheme.cursorBlue.withOpacity(0.1)
+                  : isUnifiedSummary
+                      ? CursorTheme.warning.withOpacity(0.05)
+                      : CursorTheme.backgroundSecondary,
+          borderRadius: BorderRadius.circular(CursorTheme.radiusSmall),
+          border: Border.all(
               color: isMultiSelected
                   ? CursorTheme.cursorBlueLight
                   : isPlaying
-                      ? CursorTheme.cursorBlue
-                      : isSelected
-                          ? CursorTheme.cursorBlue
-                          : isUnifiedSummary
-                              ? CursorTheme.warning
-                              : CursorTheme.borderSecondary,
+                ? CursorTheme.cursorBlue
+                : isSelected
+                    ? CursorTheme.cursorBlue
+                    : isUnifiedSummary
+                        ? CursorTheme.warning
+                        : CursorTheme.borderSecondary,
               width: isMultiSelected || isPlaying || isSelected ? 2 : 1,
-            ),
           ),
-          child: Padding(
-            padding: const EdgeInsets.all(CursorTheme.spacingS),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(CursorTheme.spacingS),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
               // 상단: 시간 정보 + 요약 표시
               Row(
                 children: [
@@ -856,10 +856,10 @@ class _SegmentTableWidgetState extends State<SegmentTableWidget> {
                       segment,
                       isActive: isPlaying || isSelected,
                     ),
-              ],
+            ],
             ),
           ),
-        ),
+          ),
         ),
       ),
     );

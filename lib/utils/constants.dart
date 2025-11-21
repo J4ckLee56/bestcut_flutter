@@ -73,4 +73,7 @@ class FirebaseFunctionsUrls {
   
   // 액션 로깅 관련
   static const String logAction = 'https://logaction-v4kacndtqq-uc.a.run.app';
+  
+  // GPT 관련
+  static const String chatProxy = 'https://chatproxy-v4kacndtqq-uc.a.run.app';
 } 

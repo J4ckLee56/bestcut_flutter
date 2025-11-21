@@ -82,3 +82,8 @@ python tools/audio_pipeline/align_with_whisperx.py \
 
 테스트 후 이상 동작이나 성능 이슈가 있으면 각 단계 출력물을 공유해 주세요. 단계별로 조정하며 안정화한 뒤 Flutter 연동으로 넘어갑니다.
 
+
+
+
+
+
